@@ -97,16 +97,24 @@ func UnpackSQLState(v int32) string {
 	return string(b[:])
 }
 
+//export strlen
+func cStrlen(p *byte) uintptr
+
 // GoString copies a NUL-terminated C string ("" for NULL).
 func GoString(p *byte) string {
 	if p == nil {
 		return ""
 	}
-	n := 0
-	for *(*byte)(unsafe.Add(unsafe.Pointer(p), n)) != 0 {
-		n++
+	return string(unsafe.Slice(p, cStrlen(p)))
+}
+
+// StringView returns a NUL-terminated C string as a Go string without
+// copying it: it's only valid as long as the C memory is.
+func StringView(p *byte) string {
+	if p == nil {
+		return ""
 	}
-	return string(unsafe.Slice(p, n))
+	return unsafe.String(p, cStrlen(p))
 }
 
 // CBytes returns s as a NUL-terminated byte array for C.

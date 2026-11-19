@@ -209,7 +209,8 @@ func fromDatum[T Scalar](d uint64) (v T) {
 	case *[]byte:
 		*p = append([]byte{}, varlena(d)...)
 	case *CString:
-		*p = CString(core.GoString((*byte)(unsafe.Pointer(uintptr(d)))))
+		// Not copied: valid during the call (see pg.CString).
+		*p = CString(core.StringView((*byte)(unsafe.Pointer(uintptr(d)))))
 	}
 	return
 }

@@ -116,7 +116,7 @@ doc comment becomes the function's `COMMENT`.
 | `*[]T`                    | `T[]`, `nil` ↔ `NULL`                      |
 | `[]*T`                    | `T[]` with NULL elements (`nil`)           |
 | `iter.Seq[T]` (results)   | `SETOF T`                                  |
-| `pg.CString`              | `cstring` (input/output functions of types) |
+| `pg.CString`              | `cstring` (input/output functions of types; arguments aren't copied: valid during the call) |
 | no result                 | `void`                                     |
 | last result `error`       | raises the error                           |
 

@@ -48,5 +48,8 @@ with `isn.weak` off and on, then formats and casts everything parsed plus
 random raw values. On 100,000 inputs (103,087 distinct values): 0
 mismatches in results and error messages.
 
-Speed, 500,000 ISBNs (PostgreSQL 19): parsing 0.24 s (C: 0.14 s),
-formatting 0.40 s (C: 0.30 s).
+Speed, 1,000,000 ISBNs (PostgreSQL 19): parsing 146 ms (C: 111 ms),
+formatting 177 ms (C: 147 ms). Of the remaining difference, about 15 ns
+per call is gopgext's call boundary and the rest TinyGo's code (bounds
+checks); the parser uses stack buffers like the original, since heap
+allocations and closures capturing its locals made it markedly slower.

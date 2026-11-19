@@ -464,22 +464,26 @@ func ean2string(ean uint64, shortType bool) (string, error) {
 // string2ean parses a string into an ean13 of the accept type. If the
 // string ends with '!' it's always treated as having an invalid check digit.
 func string2ean(str string, accept isnType) (uint64, error) {
-	s := append([]byte(str), 0, 0)
-	buf := []byte("                \x00") // 16 spaces
-	aux1 := 3                             // leave space for the first part
+	// Fixed-size buffers on the stack, like the original: this is called
+	// for every value parsed, and heap allocations (or closures capturing
+	// these locals) make it markedly slower.
+	var sarr [64]byte
+	var s []byte
+	if len(str)+2 <= len(sarr) {
+		s = sarr[:copy(sarr[:], str)+2]
+	} else {
+		s = append([]byte(str), 0, 0)
+	}
+	var barr [17]byte
+	copy(barr[:], "                ")
+	buf := barr[:]
+	aux1 := 3 // leave space for the first part
 	a2 := 0
 	typ := typeInvalid
 	var check uint32
 	rcheck := ^uint32(0)
 	length := 0
 	magic, valid := false, true
-
-	invalid := func() (uint64, error) {
-		return 0, errInvalidText("invalid input syntax for %s number: \"%s\"", isnNames[accept], str)
-	}
-	wrongType := func() (uint64, error) {
-		return 0, errInvalidText("cannot cast %s to %s for number: \"%s\"", isnNames[typ], isnNames[accept], str)
-	}
 
 	// Recognize and validate the number.
 	for s[a2] != 0 && length <= 13 {
@@ -493,7 +497,7 @@ func string2ean(str string, accept isnType) (uint64, error) {
 		case length == 0 && (c == 'M' || c == 'm'):
 			// only ISMN can be here
 			if typ != typeInvalid {
-				return invalid()
+				return invalid(accept, str)
 			}
 			typ = typeISMN
 			buf[aux1] = 'M'
@@ -502,7 +506,7 @@ func string2ean(str string, accept isnType) (uint64, error) {
 		case length == 7 && (digit || c == 'X' || c == 'x') && last:
 			// only ISSN can be here
 			if typ != typeInvalid {
-				return invalid()
+				return invalid(accept, str)
 			}
 			typ = typeISSN
 			buf[aux1] = asciiUpper(c)
@@ -511,7 +515,7 @@ func string2ean(str string, accept isnType) (uint64, error) {
 		case length == 9 && (digit || c == 'X' || c == 'x') && last:
 			// only ISBN and ISMN can be here
 			if typ != typeInvalid && typ != typeISMN {
-				return invalid()
+				return invalid(accept, str)
 			}
 			if typ == typeInvalid {
 				typ = typeISBN // ISMN must start with 'M'
@@ -522,7 +526,7 @@ func string2ean(str string, accept isnType) (uint64, error) {
 		case length == 11 && digit && last:
 			// only UPC can be here
 			if typ != typeInvalid {
-				return invalid()
+				return invalid(accept, str)
 			}
 			typ = typeUPC
 			buf[aux1] = c
@@ -537,7 +541,7 @@ func string2ean(str string, accept isnType) (uint64, error) {
 			}
 			magic = true
 		case !digit:
-			return invalid()
+			return invalid(accept, str)
 		default:
 			buf[aux1] = c
 			aux1++
@@ -551,53 +555,52 @@ func string2ean(str string, accept isnType) (uint64, error) {
 	buf[aux1] = 0
 
 	// Find the current check digit value.
-	digitAt := func(i int) uint32 { return uint32(int32(buf[i]) - '0') }
 	switch length {
 	case 13:
 		// only EAN13 can be here
 		if typ != typeInvalid {
-			return invalid()
+			return invalid(accept, str)
 		}
 		typ = typeEAN13
-		check = digitAt(15)
+		check = uint32(int32(buf[15]) - '0')
 	case 12:
 		// only UPC can be here
 		if typ != typeUPC {
-			return invalid()
+			return invalid(accept, str)
 		}
-		check = digitAt(14)
+		check = uint32(int32(buf[14]) - '0')
 	case 10:
 		if typ != typeISBN && typ != typeISMN {
-			return invalid()
+			return invalid(accept, str)
 		}
 		if buf[12] == 'X' {
 			check = 10
 		} else {
-			check = digitAt(12)
+			check = uint32(int32(buf[12]) - '0')
 		}
 	case 8:
 		if typ != typeInvalid && typ != typeISSN {
-			return invalid()
+			return invalid(accept, str)
 		}
 		typ = typeISSN
 		if buf[10] == 'X' {
 			check = 10
 		} else {
-			check = digitAt(10)
+			check = uint32(int32(buf[10]) - '0')
 		}
 	default:
-		return invalid()
+		return invalid(accept, str)
 	}
 	if typ == typeInvalid {
-		return invalid()
+		return invalid(accept, str)
 	}
 
 	// Obtain the real check digit value, validate, and convert to ean13.
 	if accept == typeEAN13 && typ != accept {
-		return wrongType()
+		return wrongType(typ, accept, str)
 	}
 	if accept != typeAny && typ != typeEAN13 && typ != accept {
-		return wrongType()
+		return wrongType(typ, accept, str)
 	}
 	switch typ {
 	case typeEAN13:
@@ -619,7 +622,7 @@ func string2ean(str string, accept isnType) (uint64, error) {
 			typ = typeISBN
 		}
 		if accept != typeEAN13 && accept != typeAny && typ != accept {
-			return wrongType()
+			return wrongType(typ, accept, str)
 		}
 	case typeISMN:
 		copy(buf, "9790") // for now ISMN is only 9790
@@ -676,6 +679,14 @@ func string2ean(str string, accept isnType) (uint64, error) {
 		result |= 1
 	}
 	return result, nil
+}
+
+func invalid(accept isnType, str string) (uint64, error) {
+	return 0, errInvalidText("invalid input syntax for %s number: \"%s\"", isnNames[accept], str)
+}
+
+func wrongType(typ, accept isnType, str string) (uint64, error) {
+	return 0, errInvalidText("cannot cast %s to %s for number: \"%s\"", isnNames[typ], isnNames[accept], str)
 }
 
 // ---- SQL-callable functions (declared by sql/isn--*.sql) ----------------

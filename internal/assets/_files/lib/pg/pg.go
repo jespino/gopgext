@@ -29,6 +29,10 @@ type Error = core.Error
 // CString is the SQL type cstring, used by the input and output functions
 // of data types: functions taking or returning one are declared with
 // "manual" and a CREATE TYPE in sql/.
+//
+// A CString argument is not copied: it refers to PostgreSQL's memory and is
+// only valid during the call. To keep it (in a global, a map...), copy it
+// with strings.Clone. Results are copied.
 type CString = core.CString
 
 // Errorf returns an Error with the given SQLSTATE code (e.g. "22023",
