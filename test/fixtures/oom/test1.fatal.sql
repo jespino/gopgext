@@ -1,0 +1,3 @@
+CREATE EXTENSION oom;
+SELECT hog(4) = 4 AS fits;
+SELECT hog(64);

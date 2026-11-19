@@ -1,0 +1,11 @@
+/gopgext
+*.so
+*.control
+*--*.sql
+go.work
+go.work.sum
+_pgtest/
+
+# ...but sql/ files of projects are sources (appended to the install script)
+!sql/*.sql
+!**/sql/*.sql
