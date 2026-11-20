@@ -126,7 +126,11 @@ func From(order *int32) int32 { return 0 }
 			t.Errorf("SQL lacks %q:\n%s", want, sql)
 		}
 	}
-	goSrc := string(genGo(funcs))
+	goBytes, err := genGo(funcs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goSrc := string(goBytes)
 	if !strings.Contains(goSrc, `_gopgext_fmgr.ArgPtr[int32](_c, 0)`) || !strings.Contains(goSrc, "defer _c.End(_c.Begin(true))") {
 		t.Errorf("Go wrapper:\n%s", goSrc)
 	}
@@ -185,8 +189,8 @@ func Echo(s *pg.CString) string { return "" }
 	if !strings.Contains(exp, "thing_in;") || !strings.Contains(exp, "pg_finfo_thing_out;") || !strings.Contains(exp, "pg_finfo_my_handler;") {
 		t.Errorf("exports:\n%s", exp)
 	}
-	if !strings.Contains(string(genGo(funcs)), "_gopgext_fmgr.Arg[_gopgext_fmgr.CString](_c, 0") {
-		t.Errorf("Go wrapper:\n%s", genGo(funcs))
+	if goSrc, err := genGo(funcs); err != nil || !strings.Contains(string(goSrc), "_gopgext_fmgr.Arg[_gopgext_fmgr.CString](_c, 0") {
+		t.Errorf("Go wrapper (%v):\n%s", err, goSrc)
 	}
 
 	for _, tc := range []struct{ src, want string }{

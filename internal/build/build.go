@@ -162,7 +162,11 @@ func (b *builder) run() (*Result, error) {
 	if b.ldflags, err = scanLDFlags(proj); err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(src, GeneratedGoFile), genGo(funcs), 0o644); err != nil {
+	goSrc, err := genGo(funcs)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(src, GeneratedGoFile), goSrc, 0o644); err != nil {
 		return nil, err
 	}
 	goWork := filepath.Join(work, "go.work")
