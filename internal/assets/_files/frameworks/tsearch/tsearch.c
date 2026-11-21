@@ -103,7 +103,7 @@ ErrorData  *gopgext_tsearch_tokentypes(int64 n, struct ts_tokentype *types, Datu
 ErrorData  *gopgext_tsearch_call_lexize(Oid dict, const char *word, int64 len, TSLexeme **out, int64 *n);
 ErrorData  *gopgext_tsearch_dictionary(FunctionCallInfo fcinfo, const char *name, Oid *out, char **schema);
 ErrorData  *gopgext_tsearch_config_path(const char *name, const char *ext, char **out);
-int			gopgext_tsearch_open(const char *path, tsearch_readline_state **out);
+ErrorData  *gopgext_tsearch_open(const char *path, tsearch_readline_state **out, int *err);
 ErrorData  *gopgext_tsearch_readline(tsearch_readline_state *st, char **line, bool *eof);
 void		gopgext_tsearch_close(tsearch_readline_state *st);
 ErrorData  *gopgext_tsearch_lower(const char *s, int64 len, char **out);
@@ -437,8 +437,8 @@ gopgext_tsearch_config_path(const char *name, const char *ext, char **out)
  * error context "line N of configuration file" until it's closed). Returns
  * 0, or errno.
  */
-int
-gopgext_tsearch_open(const char *path, tsearch_readline_state **out)
+static int
+tsearch_open(const char *path, tsearch_readline_state **out)
 {
 	tsearch_readline_state *st = palloc0(sizeof(*st));
 
@@ -451,6 +451,18 @@ gopgext_tsearch_open(const char *path, tsearch_readline_state **out)
 	}
 	*out = st;
 	return 0;
+}
+
+/*
+ * tsearch_open for Go: the allocations, and AllocateFile ("exceeded
+ * maxAllocatedDescs"), may raise errors. The errno is stored in *err.
+ */
+ErrorData *
+gopgext_tsearch_open(const char *path, tsearch_readline_state **out, int *err)
+{
+	*out = NULL;
+	*err = 0;
+	GOPGEXT_GUARD(*err = tsearch_open(path, out));
 }
 
 /*

@@ -51,8 +51,9 @@ static shmem_request_hook_type prev_shmem_request_hook;
 #endif
 static shmem_startup_hook_type prev_shmem_startup_hook;
 
-int64		gopgext_shmem_register(int64 kind, const char *name, int64 size,
-								   int64 keysize, int64 entrysize, int64 max);
+ErrorData  *gopgext_shmem_register(int64 kind, const char *name, int64 size,
+								   int64 keysize, int64 entrysize, int64 max,
+								   int64 *id);
 bool		gopgext_shmem_attached(void);
 void	   *gopgext_shmem_ptr(int64 i);
 ErrorData  *gopgext_shmem_lock(int64 i, bool exclusive);
@@ -183,9 +184,9 @@ shmem_startup(void)
  * Registers an object (while the library loads); returns its index, or -1
  * if the library isn't being loaded by shared_preload_libraries.
  */
-int64
-gopgext_shmem_register(int64 kind, const char *name, int64 size,
-					   int64 keysize, int64 entrysize, int64 max)
+static int64
+shmem_register(int64 kind, const char *name, int64 size,
+			   int64 keysize, int64 entrysize, int64 max)
 {
 	struct shmem_object *o;
 
@@ -221,6 +222,15 @@ gopgext_shmem_register(int64 kind, const char *name, int64 size,
 	request_object(o);
 #endif
 	return nobjects++;
+}
+
+/* shmem_register for Go: its allocations may raise errors. */
+ErrorData *
+gopgext_shmem_register(int64 kind, const char *name, int64 size,
+					   int64 keysize, int64 entrysize, int64 max, int64 *id)
+{
+	*id = -1;
+	GOPGEXT_GUARD(*id = shmem_register(kind, name, size, keysize, entrysize, max));
 }
 
 bool

@@ -112,8 +112,8 @@ Oid			gopgext_database_id(void);
 bool		gopgext_loaded(void);
 bool		gopgext_preloading(void);
 ErrorData  *gopgext_has_privs_of(const char *role, bool *out);
-int			gopgext_file_read(const char *path, char **data, int64 *len);
-int			gopgext_file_write(const char *path, const char *data, int64 len);
+ErrorData  *gopgext_file_read(const char *path, char **data, int64 *len, int *err);
+ErrorData  *gopgext_file_write(const char *path, const char *data, int64 len, int *err);
 int			gopgext_file_remove(const char *path);
 const char *gopgext_strerror(int err);
 ErrorData  *gopgext_spi_execute(const char *sql, int64 nargs, struct gopgext_value *args,

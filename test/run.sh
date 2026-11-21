@@ -95,4 +95,9 @@ if grep -E "TRAP:|PANIC:|terminated by signal|was terminated by" "$DIR/server.lo
 	echo "FAIL: server crashed (see $DIR/server.log)"
 	fail=1
 fi
+# gopgext_invoke's backstop: a PostgreSQL error skipped Go frames.
+if grep "unwound Go frames" "$DIR/server.log"; then
+	echo "FAIL: a C helper raised an error without GOPGEXT_GUARD (see $DIR/server.log)"
+	fail=1
+fi
 exit $fail

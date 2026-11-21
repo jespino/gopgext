@@ -38,7 +38,12 @@ copies into `pg_config --sharedir`/tsearch_data (text search dictionaries'
 data files, see gopgext/tsearch). `csrc/` files' `PG_FUNCTION_INFO_V1` functions are
 exported (so `sql/` files can declare them, e.g. a foreign data wrapper's
 handler), and Go can call their other functions through body-less
-`//export` declarations. `//gopgext:ldflags -lcurl` in a Go file adds
+`//export` declarations. A C function Go calls must not raise a PostgreSQL
+error through Go frames: use calls that report failures instead of raising
+(`palloc_extended(..., MCXT_ALLOC_NO_OOM)` rather than `palloc`, ...). If one
+does raise, the error still reaches PostgreSQL, but Go's deferred calls in
+between don't run, and the server log gets a WARNING ("a PostgreSQL error
+unwound Go frames"). `//gopgext:ldflags -lcurl` in a Go file adds
 linker flags (system libraries the C code uses).
 `//gopgext:alias name=target` exports the library's V1 function `target`
 (e.g. a framework's `gopgext_gist_consistent`) under another C symbol too,

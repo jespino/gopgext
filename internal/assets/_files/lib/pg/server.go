@@ -16,10 +16,10 @@ import (
 // fs.ErrNotExist for missing files.
 
 //export gopgext_file_read
-func fileRead(path *byte, data *unsafe.Pointer, n *int64) int32
+func fileRead(path *byte, data *unsafe.Pointer, n *int64, errno *int32) uintptr
 
 //export gopgext_file_write
-func fileWrite(path *byte, data *byte, n int64) int32
+func fileWrite(path *byte, data *byte, n int64, errno *int32) uintptr
 
 //export gopgext_file_remove
 func fileRemove(path *byte) int32
@@ -44,7 +44,9 @@ func pathError(op, path string, errno int32) error {
 func ReadFile(path string) ([]byte, error) {
 	var p unsafe.Pointer
 	var n int64
-	if errno := fileRead(core.CBytes(path), &p, &n); errno != 0 {
+	var errno int32
+	core.Check(fileRead(core.CBytes(path), &p, &n, &errno))
+	if errno != 0 {
 		return nil, pathError("read", path, errno)
 	}
 	b := append([]byte(nil), unsafe.Slice((*byte)(p), n)...)
@@ -56,7 +58,9 @@ func ReadFile(path string) ([]byte, error) {
 // temporary file next to it (path + ".tmp"), flushes it to disk and renames
 // it over path.
 func WriteFile(path string, data []byte) error {
-	if errno := fileWrite(core.CBytes(path), unsafe.SliceData(data), int64(len(data))); errno != 0 {
+	var errno int32
+	core.Check(fileWrite(core.CBytes(path), unsafe.SliceData(data), int64(len(data)), &errno))
+	if errno != 0 {
 		return pathError("write", path, errno)
 	}
 	return nil

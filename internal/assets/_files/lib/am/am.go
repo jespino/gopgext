@@ -251,7 +251,7 @@ func cPfree(p unsafe.Pointer)
 func cOption(rel uintptr, i, def int64) int64
 
 //export gopgext_am_opfamily
-func cOpfamily(rel uintptr, col int64) *byte
+func cOpfamily(rel uintptr, col int64, out **byte) uintptr
 
 //export gopgext_am_natts
 func cNatts(rel uintptr) int64
@@ -285,7 +285,11 @@ func (idx *Index) Columns() int { return int(cNatts(idx.rel)) }
 
 // OpFamily returns the name of the operator family of column col (0-based):
 // its operator class's name, unless created with FAMILY.
-func (idx *Index) OpFamily(col int) string { return core.GoString(cOpfamily(idx.rel, int64(col))) }
+func (idx *Index) OpFamily(col int) string {
+	var p *byte
+	core.Check(cOpfamily(idx.rel, int64(col), &p))
+	return core.GoString(p)
+}
 
 // Option returns the value of an option of the index.
 func (idx *Index) Option(name string) int {

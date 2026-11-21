@@ -59,7 +59,9 @@ func register(kind int, name string, size, keysize, entrysize uintptr, entries i
 	if !loading() {
 		panic(fmt.Sprintf("shmem: %q must be created while the library loads (in main or a package-level variable)", name))
 	}
-	return object{registerC(int64(kind), core.CBytes(name), int64(size), int64(keysize), int64(entrysize), int64(entries)), name}
+	var id int64
+	core.Check(registerC(int64(kind), core.CBytes(name), int64(size), int64(keysize), int64(entrysize), int64(entries), &id))
+	return object{id, name}
 }
 
 func (o object) ptr() unsafe.Pointer {
@@ -347,7 +349,7 @@ const (
 func loading() bool
 
 //export gopgext_shmem_register
-func registerC(kind int64, name *byte, size, keysize, entrysize, max int64) int64
+func registerC(kind int64, name *byte, size, keysize, entrysize, max int64, id *int64) uintptr
 
 //export gopgext_shmem_attached
 func attached() bool

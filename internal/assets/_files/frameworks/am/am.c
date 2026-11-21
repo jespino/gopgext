@@ -81,7 +81,7 @@ ErrorData  *gopgext_am_read_page(Relation rel, int64 blkno, char **data, int64 *
 ErrorData  *gopgext_am_build_scan(void *ctx, int64 *heap_tuples);
 bool		gopgext_am_is_dead(void *ctx, int64 tid);
 int64		gopgext_am_option(Relation rel, int64 i, int64 def);
-char	   *gopgext_am_opfamily(Relation rel, int64 col);
+ErrorData  *gopgext_am_opfamily(Relation rel, int64 col, char **out);
 int64		gopgext_am_natts(Relation rel);
 int64		gopgext_am_relfilenode(Relation rel);
 int64		gopgext_am_xact_gen(void);
@@ -600,9 +600,9 @@ gopgext_am_option(Relation rel, int64 i, int64 def)
 	return opts->values[i];
 }
 
-/* The name of the operator family of index column col (0-based). */
-char *
-gopgext_am_opfamily(Relation rel, int64 col)
+/* The name of the operator family of index column col (0-based), or NULL. */
+static char *
+opfamily_name(Relation rel, int64 col)
 {
 	HeapTuple	tup;
 	char	   *name;
@@ -615,6 +615,14 @@ gopgext_am_opfamily(Relation rel, int64 col)
 	name = pstrdup(NameStr(((Form_pg_opfamily) GETSTRUCT(tup))->opfname));
 	ReleaseSysCache(tup);
 	return name;
+}
+
+/* opfamily_name for Go: the catalog lookup and pstrdup may raise errors. */
+ErrorData *
+gopgext_am_opfamily(Relation rel, int64 col, char **out)
+{
+	*out = NULL;
+	GOPGEXT_GUARD(*out = opfamily_name(rel, col));
 }
 
 int64

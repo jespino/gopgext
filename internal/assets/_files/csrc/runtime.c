@@ -157,9 +157,18 @@ gopgext_invoke(FunctionCallInfo fcinfo, gopgext_gofn fn)
 	}
 	PG_CATCH();
 	{
-		/* Shouldn't happen: helpers catch errors. Keep Go consistent. */
+		/*
+		 * Shouldn't happen: helpers catch errors (GOPGEXT_GUARD). The error
+		 * skipped Go frames, so their deferred calls didn't run: keep the Go
+		 * runtime consistent, and say so (test/run.sh fails on this warning),
+		 * as Go state may be left inconsistent (a mutex still locked...).
+		 */
 		tinygo_pgext_leave(&entry);
 		gopgext_pending = outer_pending;
+		ereport(WARNING,
+				(errmsg_internal("gopgext: a PostgreSQL error unwound Go frames in extension \"%s\"",
+								 GOPGEXT_NAME),
+				 errhint("A C function called from Go raised an error without GOPGEXT_GUARD.")));
 		PG_RE_THROW();
 	}
 	PG_END_TRY();
@@ -891,10 +900,11 @@ gopgext_loaded(void)
 
 /*
  * Reads a whole file into palloc'd memory. Returns 0 or an errno (ENOENT for
- * a missing file); never raises errors.
+ * a missing file). AllocateFile raises an error when the backend has too many
+ * files open ("exceeded maxAllocatedDescs"): see gopgext_file_read.
  */
-int
-gopgext_file_read(const char *path, char **data, int64 *len)
+static int
+file_read(const char *path, char **data, int64 *len)
 {
 	FILE	   *f = AllocateFile(path, PG_BINARY_R);
 	struct stat st;
@@ -930,10 +940,12 @@ gopgext_file_read(const char *path, char **data, int64 *len)
 
 /*
  * Writes a file atomically: to path.tmp, fsync'd, then renamed over path
- * (durable_rename). Returns 0 or an errno; never raises errors.
+ * (durable_rename). Returns 0 or an errno. AllocateFile and durable_rename's
+ * OpenTransientFile raise an error when the backend has too many files open:
+ * see gopgext_file_write.
  */
-int
-gopgext_file_write(const char *path, const char *data, int64 len)
+static int
+file_write(const char *path, const char *data, int64 len)
 {
 	char		tmp[MAXPGPATH];
 	FILE	   *f;
@@ -965,6 +977,24 @@ gopgext_file_write(const char *path, const char *data, int64 len)
 		return err;
 	}
 	return 0;
+}
+
+/*
+ * file_read and file_write for Go: the errno goes to *err, and a PostgreSQL
+ * error (too many open files) is returned as the pending error.
+ */
+ErrorData *
+gopgext_file_read(const char *path, char **data, int64 *len, int *err)
+{
+	*err = 0;
+	GOPGEXT_GUARD(*err = file_read(path, data, len));
+}
+
+ErrorData *
+gopgext_file_write(const char *path, const char *data, int64 len, int *err)
+{
+	*err = 0;
+	GOPGEXT_GUARD(*err = file_write(path, data, len));
 }
 
 /* Removes a file; 0 or an errno (ENOENT if it didn't exist). */

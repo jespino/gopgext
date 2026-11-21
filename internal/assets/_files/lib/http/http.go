@@ -26,11 +26,12 @@ import (
 	"time"
 	"unsafe"
 
+	"gopgext/internal/core"
 	"gopgext/pg"
 )
 
 //export gopgext_http_start
-func cStart(method, url, headers, body *byte, bodyLen, timeoutMs int64, errbuf *byte) int64
+func cStart(method, url, headers, body *byte, bodyLen, timeoutMs int64, errbuf *byte, id *int64) uintptr
 
 //export gopgext_http_wait_headers
 func cWaitHeaders(id int64) int64
@@ -194,8 +195,9 @@ func (c *Client) Do(req *Request) (*Response, error) {
 		body = cstr(string(req.Body))
 	}
 	errbuf := make([]byte, 256)
-	id := cStart(cstr(method), cstr(req.URL), cstr(lines.String()), body, int64(len(req.Body)),
-		c.Timeout.Milliseconds(), &errbuf[0])
+	var id int64
+	core.Check(cStart(cstr(method), cstr(req.URL), cstr(lines.String()), body, int64(len(req.Body)),
+		c.Timeout.Milliseconds(), &errbuf[0], &id))
 	if id == 0 {
 		return nil, &Error{method, req.URL, gostr(&errbuf[0])}
 	}

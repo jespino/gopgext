@@ -440,7 +440,7 @@ func (e *OpenError) Error() string {
 type readlineState struct{}
 
 //export gopgext_tsearch_open
-func openFile(path *byte, out **readlineState) int32
+func openFile(path *byte, out **readlineState, errno *int32) uintptr
 
 //export gopgext_tsearch_readline
 func readLine(st *readlineState, line **byte, eof *bool) uintptr
@@ -466,7 +466,9 @@ func strerror(err int32) *byte
 func ReadConfigFile(path string) iter.Seq2[string, error] {
 	return func(yield func(string, error) bool) {
 		var st *readlineState
-		if errno := openFile(core.CBytes(path), &st); errno != 0 {
+		var errno int32
+		core.Check(openFile(core.CBytes(path), &st, &errno))
+		if errno != 0 {
 			yield("", &OpenError{Path: path, Reason: core.GoString(strerror(errno))})
 			return
 		}

@@ -41,8 +41,9 @@ typedef struct transfer
 	char		error[CURL_ERROR_SIZE];
 } transfer;
 
-int64		gopgext_http_start(const char *method, const char *url, const char *headers,
-							   const char *body, int64 body_len, int64 timeout_ms, char *errbuf);
+ErrorData  *gopgext_http_start(const char *method, const char *url, const char *headers,
+							   const char *body, int64 body_len, int64 timeout_ms, char *errbuf,
+							   int64 *id);
 int64		gopgext_http_wait_headers(int64 id);
 int64		gopgext_http_read(int64 id, const char **data, int64 *len);
 void		gopgext_http_consume(int64 id, int64 n);
@@ -179,9 +180,9 @@ lookup(int64 id)
  * Starts a request. headers are "Name: value" lines separated by '\n'.
  * Returns the transfer id, or 0 with the reason in errbuf (256 bytes).
  */
-int64
-gopgext_http_start(const char *method, const char *url, const char *headers,
-				   const char *body, int64 body_len, int64 timeout_ms, char *errbuf)
+static int64
+http_start(const char *method, const char *url, const char *headers,
+		   const char *body, int64 body_len, int64 timeout_ms, char *errbuf)
 {
 	transfer   *t;
 	const char *p;
@@ -269,6 +270,19 @@ gopgext_http_start(const char *method, const char *url, const char *headers,
 	t->next = transfers;
 	transfers = t;
 	return t->id;
+}
+
+/*
+ * http_start for Go: registering the transaction callback (on the first
+ * request) allocates, which may raise an error.
+ */
+ErrorData *
+gopgext_http_start(const char *method, const char *url, const char *headers,
+				   const char *body, int64 body_len, int64 timeout_ms, char *errbuf,
+				   int64 *id)
+{
+	*id = 0;
+	GOPGEXT_GUARD(*id = http_start(method, url, headers, body, body_len, timeout_ms, errbuf));
 }
 
 /* Runs the transfer until cond holds or it ends. -2: an interrupt is pending. */

@@ -28,10 +28,13 @@ signatures ──▶ <name>.control, <name>--<version>.sql
 - **Calls.** For every SQL function gopgext generates a V1 C function and a
   Go wrapper. `gopgext_invoke` (runtime.c) enters Go, and once Go has
   returned it raises the error Go reported, if any: a PostgreSQL error never
-  `longjmp`s through Go frames. C helpers that may raise one catch it; if it
-  can't be handled in Go (say, a corrupt toast pointer), Go unwinds with a
-  panic and the original error is re-thrown, and queries are refused
-  meanwhile.
+  `longjmp`s through Go frames. C helpers that may raise one catch it
+  (`GOPGEXT_GUARD`); if it can't be handled in Go (say, a corrupt toast
+  pointer), Go unwinds with a panic and the original error is re-thrown,
+  and queries are refused meanwhile. `gopgext_invoke` also catches errors
+  as a last resort, should a helper ever let one through: it resets the Go
+  runtime's state, logs a WARNING ("a PostgreSQL error unwound Go frames")
+  and re-throws the error; `make pgtest` fails if that WARNING appears.
 - **Symbols.** All Go symbols are local to the library and it exports only
   what PostgreSQL looks up, so several Go extensions can be loaded in one
   backend.
