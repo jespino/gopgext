@@ -1,4 +1,5 @@
-/* Generated using: hugo gen chromastyles --style=github-dark */
+/* Generated using: hugo gen chromastyles --style=github-dark
+   Explicit token colors also override the shared light-theme stylesheet. */
 
 /* Background */ :root[data-theme="dark"] .bg { color:#e6edf3;background-color:#0d1117; }
 /* PreWrapper */ :root[data-theme="dark"] .chroma { color:#e6edf3;background-color:#0d1117;-webkit-text-size-adjust:none; }
@@ -17,6 +18,7 @@
 /* KeywordPseudo */ :root[data-theme="dark"] .chroma .kp { color:#79c0ff }
 /* KeywordReserved */ :root[data-theme="dark"] .chroma .kr { color:#ff7b72 }
 /* KeywordType */ :root[data-theme="dark"] .chroma .kt { color:#ff7b72 }
+/* NameAttribute */ :root[data-theme="dark"] .chroma .na { color:#79c0ff }
 /* NameClass */ :root[data-theme="dark"] .chroma .nc { color:#f0883e;font-weight:bold }
 /* NameConstant */ :root[data-theme="dark"] .chroma .no { color:#79c0ff;font-weight:bold }
 /* NameDecorator */ :root[data-theme="dark"] .chroma .nd { color:#d2a8ff;font-weight:bold }
@@ -27,6 +29,8 @@
 /* NameOther */ :root[data-theme="dark"] .chroma .nx { color:#e6edf3 }
 /* NameProperty */ :root[data-theme="dark"] .chroma .py { color:#79c0ff }
 /* NameTag */ :root[data-theme="dark"] .chroma .nt { color:#7ee787 }
+/* NameBuiltin */ :root[data-theme="dark"] .chroma .nb { color:#79c0ff }
+/* NameBuiltinPseudo */ :root[data-theme="dark"] .chroma .bp { color:#79c0ff }
 /* NameVariable */ :root[data-theme="dark"] .chroma .nv { color:#79c0ff }
 /* NameVariableClass */ :root[data-theme="dark"] .chroma .vc { color:#79c0ff }
 /* NameVariableGlobal */ :root[data-theme="dark"] .chroma .vg { color:#79c0ff }
@@ -60,6 +64,7 @@
 /* Operator */ :root[data-theme="dark"] .chroma .o { color:#ff7b72;font-weight:bold }
 /* OperatorWord */ :root[data-theme="dark"] .chroma .ow { color:#ff7b72;font-weight:bold }
 /* OperatorReserved */ :root[data-theme="dark"] .chroma .or { color:#ff7b72;font-weight:bold }
+/* Punctuation */ :root[data-theme="dark"] .chroma .p { color:#e6edf3 }
 /* Comment */ :root[data-theme="dark"] .chroma .c { color:#8b949e;font-style:italic }
 /* CommentHashbang */ :root[data-theme="dark"] .chroma .ch { color:#8b949e;font-style:italic }
 /* CommentMultiline */ :root[data-theme="dark"] .chroma .cm { color:#8b949e;font-style:italic }
@@ -68,7 +73,7 @@
 /* CommentPreproc */ :root[data-theme="dark"] .chroma .cp { color:#8b949e;font-weight:bold;font-style:italic }
 /* CommentPreprocFile */ :root[data-theme="dark"] .chroma .cpf { color:#8b949e;font-weight:bold;font-style:italic }
 /* GenericDeleted */ :root[data-theme="dark"] .chroma .gd { color:#ffa198;background-color:#490202 }
-/* GenericEmph */ :root[data-theme="dark"] .chroma .ge { font-style:italic }
+/* GenericEmph */ :root[data-theme="dark"] .chroma .ge { color:#e6edf3;font-style:italic }
 /* GenericError */ :root[data-theme="dark"] .chroma .gr { color:#ffa198 }
 /* GenericHeading */ :root[data-theme="dark"] .chroma .gh { color:#79c0ff;font-weight:bold }
 /* GenericInserted */ :root[data-theme="dark"] .chroma .gi { color:#56d364;background-color:#0f5323 }
