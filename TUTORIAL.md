@@ -164,7 +164,8 @@ func Stars(n int32) (string, error) {
 		return "", pg.Errorf(pg.CodeInvalidParameterValue, "n must not be negative, got %d", n)
 	}
 	return strings.Repeat("*", int(n)), nil
-}```
+}
+```
 
 Then rebuild and reinstall:
 
