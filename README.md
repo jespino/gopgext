@@ -1,5 +1,11 @@
 # gopgext — PostgreSQL extensions in Go
 
+> [!WARNING]
+> gopgext is **experimental**. Don't use it in production: a bug in the
+> generated code or the Go runtime runs inside the server, where it can
+> crash it or corrupt data, and the API and generated SQL may change
+> without notice.
+
 `gopgext` builds PostgreSQL extensions from plain Go code, using TinyGo. A
 project is just Go files: functions marked with `//gopgext:function` become
 SQL functions, and gopgext supplies everything else: the C glue, the
@@ -48,7 +54,7 @@ func Shout(s string) (string, error) {
 func main() {} // runs once per backend, when PostgreSQL loads the library
 ```
 
-It's the same approach as [gokm](../gokm) (Linux kernel modules in Go):
+It's the same approach as [gokm](https://github.com/jespino/gokm) (Linux kernel modules in Go):
 a custom TinyGo target and runtime layer for the host, a C runtime compiled
 by the host's own build system (PGXS here, kbuild there), and generated glue.
 
