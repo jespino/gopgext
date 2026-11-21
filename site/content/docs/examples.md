@@ -7,7 +7,9 @@ weight: 8
 
 `contrib/` holds ports of PostgreSQL's contrib modules, written only with
 the public gopgext packages (see [`contrib/README.md`](https://github.com/jespino/gopgext/blob/main/contrib/README.md)); `examples/` shows
-features.
+features. The contrib ports derive from PostgreSQL's code and regression
+tests, so they also keep the
+[PostgreSQL License](https://github.com/jespino/gopgext/blob/main/contrib/LICENSE-PostgreSQL).
 
 | Project              | Shows                                                                        |
 |----------------------|------------------------------------------------------------------------------|

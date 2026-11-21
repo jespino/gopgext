@@ -52,3 +52,10 @@ original on generated inputs (`differential.sql`).
 Each directory has a README with the details and differences. Install one
 with `gopgext install $(cat contrib/<name>/build-flags) contrib/<name>`; it
 replaces the C module of the same name in that PostgreSQL installation.
+
+## License
+
+These ports derive from PostgreSQL's contrib modules (and their regression
+tests), so besides gopgext's [MIT License](../LICENSE) they keep the
+[PostgreSQL License](LICENSE-PostgreSQL). Files based on other third-party
+code say so in their headers, with that code's notice.

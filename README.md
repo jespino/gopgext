@@ -102,6 +102,16 @@ make pgtest PG_CONFIG=/path/to/pg_config    # integration tests against a real P
 
 See [Development](https://jespino.github.io/gopgext/docs/development/) for the test conventions.
 
+## License
+
+gopgext is released under the [MIT License](LICENSE).
+
+The ports in [`contrib/`](contrib/) derive from PostgreSQL's contrib modules
+and also keep the [PostgreSQL License](contrib/LICENSE-PostgreSQL). A few
+files carry the notices of the third-party code they're based on (for
+example, pgcrypto's DES, MD5 crypt, CAST5 and RIPEMD-160); those notices
+apply to those files.
+
 ## Mascot
 
 The gopgext mascot is the Go gopher in an elephant costume, a nod to

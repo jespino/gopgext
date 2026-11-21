@@ -1,6 +1,6 @@
 baseURL = "https://jespino.github.io/gopgext/"
 title = "gopgext"
-locale = "en"
+locale = "en-US"
 theme = "gopherdocs"
 disableKinds = ["taxonomy", "term", "rss"]
 enableRobotsTXT = true
@@ -12,10 +12,12 @@ enableRobotsTXT = true
   contentPath = "site/content"
   badge = "experimental"
   mascot = "img/gopher-elephant.png"
+  socialImage = "img/social.png"
   mascotAlt = "The Go gopher in a PostgreSQL elephant costume"
   accent = "#336791"
   accentDark = "#79aee0"
   sidebar = ["/docs", "/api"]
+  license = "Released under the [MIT License](https://github.com/jespino/gopgext/blob/main/LICENSE); the contrib ports also keep the [PostgreSQL License](https://github.com/jespino/gopgext/blob/main/contrib/LICENSE-PostgreSQL)."
   footer = "The mascot is based on the Go gopher by [Renée French](https://reneefrench.blogspot.com/) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)), in a nod to PostgreSQL's elephant."
 
 [[menus.main]]

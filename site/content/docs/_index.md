@@ -38,3 +38,10 @@ SQL functions, and gopgext supplies everything else: the C glue, the
 - [How it works](/docs/internals/): the build pipeline and the runtime model.
 - [Limitations](/docs/limitations/): what isn't supported.
 - [Development](/docs/development/): building gopgext itself and running its tests.
+
+## License
+
+gopgext is released under the [MIT License](https://github.com/jespino/gopgext/blob/main/LICENSE).
+The [contrib ports](/docs/examples/) derive from PostgreSQL's contrib
+modules and also keep the
+[PostgreSQL License](https://github.com/jespino/gopgext/blob/main/contrib/LICENSE-PostgreSQL).
