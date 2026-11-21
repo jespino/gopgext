@@ -190,7 +190,7 @@ func (b *builder) run() (*Result, error) {
 	// 1. Go -> object.
 	b.step("compiling Go code with TinyGo %s (%d SQL functions)", shortTinyGoVersion(tgVersion), len(funcs))
 	rawObj := filepath.Join(work, "go.raw.o")
-	cmd := exec.Command("tinygo", "build", "-target="+root.Target, "-opt=2", "-o", rawObj, ".")
+	cmd := exec.Command("tinygo", "build", "-target="+root.Target, "-opt=2", "-no-debug", "-o", rawObj, ".")
 	cmd.Dir = src
 	cmd.Env = append(os.Environ(), "TINYGOROOT="+root.TinyGoRoot, "GOWORK="+goWork)
 	if err := b.exec(cmd); err != nil {
