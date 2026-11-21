@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/gopher-elephant.png" alt="The Go gopher in a PostgreSQL elephant costume" width="240">
+</p>
+
 # gopgext — PostgreSQL extensions in Go
 
 > [!WARNING]
@@ -1183,3 +1187,10 @@ signatures ──▶ <name>.control, <name>--<version>.sql
   usually 8 MB).
 - Linux x86-64 only; `os` file APIs are not available (TinyGo's baremetal
   `os`): use `pg.ReadFile`/`pg.WriteFile`.
+
+## Mascot
+
+The gopgext mascot is the Go gopher in an elephant costume, a nod to
+PostgreSQL's elephant. It's based on the Go gopher designed by
+[Renée French](https://reneefrench.blogspot.com/), licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
