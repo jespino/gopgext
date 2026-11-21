@@ -1,0 +1,45 @@
+baseURL = "https://jespino.github.io/gopgext/"
+title = "gopgext"
+locale = "en"
+theme = "gopherdocs"
+disableKinds = ["taxonomy", "term", "rss"]
+enableRobotsTXT = true
+
+[params]
+  tagline = "PostgreSQL extensions in Go"
+  description = "Build PostgreSQL extensions from plain Go code, using TinyGo: functions marked with //gopgext:function become SQL functions."
+  repo = "https://github.com/jespino/gopgext"
+  contentPath = "site/content"
+  badge = "experimental"
+  mascot = "img/gopher-elephant.png"
+  mascotAlt = "The Go gopher in a PostgreSQL elephant costume"
+  accent = "#336791"
+  accentDark = "#79aee0"
+  sidebar = ["/docs", "/api"]
+  footer = "The mascot is based on the Go gopher by [Renée French](https://reneefrench.blogspot.com/) ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)), in a nod to PostgreSQL's elephant."
+
+[[menus.main]]
+  name = "Docs"
+  pageRef = "/docs"
+  weight = 1
+[[menus.main]]
+  name = "Tutorial"
+  pageRef = "/docs/tutorial"
+  weight = 2
+[[menus.main]]
+  name = "API"
+  pageRef = "/api"
+  weight = 3
+
+[markup.highlight]
+  noClasses = false
+[markup.tableOfContents]
+  startLevel = 2
+  endLevel = 3
+
+[[module.mounts]]
+  source = "static"
+  target = "static"
+[[module.mounts]]
+  source = "../assets"
+  target = "static/img"

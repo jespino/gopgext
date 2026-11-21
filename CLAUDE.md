@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-gopgext is a CLI that builds PostgreSQL extensions from plain Go code using TinyGo. Functions in package `main` marked with `//gopgext:function` become SQL functions; gopgext generates the C glue, Go wrappers, `CREATE FUNCTION` script and control file. README.md is the user-facing reference (type mapping, function options, `gopgext/pg` API, limitations); keep it in sync when changing behavior.
+gopgext is a CLI that builds PostgreSQL extensions from plain Go code using TinyGo. Functions in package `main` marked with `//gopgext:function` become SQL functions; gopgext generates the C glue, Go wrappers, `CREATE FUNCTION` script and control file. The user-facing reference is the website in `site/` (Hugo, published to GitHub Pages by `.github/workflows/pages.yml`): guides in `site/content/docs/` (type mapping, function options, `gopgext/pg`, frameworks, limitations) and an API reference generated from the `_files/lib` packages' doc comments by `site/apidoc` (into the gitignored `site/content/api/`). README.md is a short overview that links to it. Keep the docs in sync when changing behavior. The theme in `site/themes/gopherdocs/` is shared with gokm's site: keep the two copies identical.
 
 ## Commands
 
@@ -13,6 +13,7 @@ go test ./internal/build -run TestScanSignatures      # single unit test
 go test ./internal/build -run TestGenGolden -update   # rewrite testdata/*.golden after changing codegen
 make pgtest PG_CONFIG=/path/to/pg_config              # integration tests against a real PostgreSQL
 sh test/run.sh [pg_config] examples/hello             # integration test for selected projects only
+make site                 # build the website into site/public (make site-serve: preview it)
 make clean
 ```
 

@@ -1,0 +1,25 @@
+{{ define "main" }}
+{{ partial "sidebar.html" . }}
+<main id="main">
+  <section class="hero">
+    <div>
+      <h1>{{ .Params.heroTitle | default site.Title | safeHTML }}</h1>
+      <p class="lead">{{ .Params.lead | default site.Params.description | markdownify }}</p>
+      <div class="actions">
+        {{ range .Params.actions }}
+          {{ $url := cond (hasPrefix .url "http") .url (relURL (strings.TrimPrefix "/" .url)) }}
+          <a class="btn{{ if .primary }} primary{{ end }}" href="{{ $url }}">{{ .label }}</a>
+        {{ end }}
+      </div>
+    </div>
+    {{ with site.Params.mascot }}<div class="hero-art"><img src="{{ . | relURL }}" alt="{{ site.Params.mascotAlt }}" width="512" height="512"></div>{{ end }}
+  </section>
+  {{ with .Params.warning }}<div class="callout-strip"><div class="alert warning"><span class="alert-title">Experimental</span>{{ . | markdownify }}</div></div>{{ end }}
+  {{ with .Params.features }}
+    <section class="features">
+      {{ range . }}<div class="feature"><h3>{{ .title }}</h3><p>{{ .text | markdownify }}</p></div>{{ end }}
+    </section>
+  {{ end }}
+  <div class="home-content prose">{{ .Content }}</div>
+</main>
+{{ end }}

@@ -1,0 +1,21 @@
+{{ $cur := . }}
+<aside class="sidebar{{ if .IsHome }} drawer-only{{ end }}" id="sidebar" aria-label="Documentation">
+  <div class="mobile-only">
+    <h4>{{ site.Title }}</h4>
+    <ul>
+      <li><a href="{{ "" | relURL }}">Home</a></li>
+      {{ range site.Menus.main }}<li><a href="{{ .URL }}">{{ .Name }}</a></li>{{ end }}
+      {{ with site.Params.repo }}<li><a href="{{ . }}">GitHub</a></li>{{ end }}
+    </ul>
+  </div>
+  {{ range site.Params.sidebar }}
+    {{ with site.GetPage . }}
+      <h4>{{ .Title }}</h4>
+      <ul>
+        {{ $active := eq .RelPermalink $cur.RelPermalink }}
+        <li><a href="{{ .RelPermalink }}"{{ if $active }} class="active" aria-current="page"{{ end }}>{{ .Params.indexTitle | default "Overview" }}</a></li>
+        {{ partial "navtree.html" (dict "section" . "current" $cur) }}
+      </ul>
+    {{ end }}
+  {{ end }}
+</aside>

@@ -1,8 +1,12 @@
-# Tutorial: a "hello world" PostgreSQL extension in Go
+---
+title: "Tutorial"
+description: "Build, install and call a \"hello world\" PostgreSQL extension written in Go, then add a function of your own."
+weight: 2
+---
 
 This tutorial builds a tiny PostgreSQL extension with gopgext, installs it
 and calls it from SQL, then adds a function of your own. It takes about ten
-minutes. [README.md](README.md) is the full reference.
+minutes. The rest of the [documentation](/docs/) is the full reference.
 
 ## 1. What you need
 
@@ -191,18 +195,14 @@ SELECT relname, stars(relpages / 10) FROM pg_class ORDER BY relpages DESC LIMIT 
 
 ## 8. Where to go next
 
-The [README](README.md) covers the rest:
+- [SQL functions](/docs/functions/): all type mappings, function options,
+  `NULL` handling, set-returning functions and row results.
+- [Data types](/docs/types/): your own SQL types, backed by Go types.
+- [The pg package](/docs/pg/): running queries through SPI, logging,
+  settings (GUCs) and errors.
+- [Frameworks](/docs/frameworks/): triggers, aggregates, index operator
+  classes, foreign data wrappers, hooks and more.
+- [Limitations](/docs/limitations/): what doesn't work, such as goroutines.
 
-- [SQL functions](README.md#sql-functions): all type mappings, function
-  options, `NULL` handling, set-returning functions and row results.
-- [Package gopgext/pg](README.md#package-gopgextpg): running queries
-  through SPI, logging, settings (GUCs) and errors.
-- [Data types](README.md#data-types): your own SQL types, backed by Go
-  types.
-- Packages for writing triggers, aggregates, index operator classes,
-  foreign data wrappers and hooks.
-- [Limitations](README.md#limitations): what doesn't work, such as
-  goroutines.
-
-The `examples/` directory has complete extensions to learn from, and
-`contrib/` has ports of PostgreSQL's own contrib modules.
+The [examples](/docs/examples/) are complete extensions to learn from,
+including ports of PostgreSQL's own contrib modules.

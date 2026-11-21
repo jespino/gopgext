@@ -1,0 +1,26 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{{ $title := cond .IsHome (printf "%s — %s" site.Title site.Params.tagline) (printf "%s · %s" .Title site.Title) }}
+<title>{{ $title }}</title>
+{{ $desc := .Description | default site.Params.description }}
+<meta name="description" content="{{ $desc }}">
+<meta property="og:title" content="{{ $title }}">
+<meta property="og:description" content="{{ $desc }}">
+<meta property="og:type" content="{{ cond .IsHome "website" "article" }}">
+<meta property="og:url" content="{{ .Permalink }}">
+{{ with site.Params.mascot }}<meta property="og:image" content="{{ . | absURL }}">
+<link rel="icon" type="image/png" href="{{ . | relURL }}">{{ end }}
+<link rel="canonical" href="{{ .Permalink }}">
+<script>
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem("theme"); } catch (e) {}
+    if (t !== "light" && t !== "dark") {
+      t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    document.documentElement.setAttribute("data-theme", t);
+  })();
+</script>
+{{ $css := slice (resources.Get "css/main.css") (resources.Get "css/chroma-light.css") (resources.Get "css/chroma-dark.css") | resources.Concat "css/site.css" | minify | fingerprint }}
+<link rel="stylesheet" href="{{ $css.RelPermalink }}" integrity="{{ $css.Data.Integrity }}">
+<style>:root{--accent:{{ site.Params.accent | default "#336791" | safeCSS }};--accent-dark:{{ site.Params.accentDark | default "#7fb0dc" | safeCSS }}}</style>

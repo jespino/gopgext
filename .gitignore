@@ -9,3 +9,9 @@ _pgtest/
 # ...but sql/ files of projects are sources (appended to the install script)
 !sql/*.sql
 !**/sql/*.sql
+
+# website build output and generated API reference
+/site/public/
+/site/resources/
+/site/content/api/
+/site/.hugo_build.lock

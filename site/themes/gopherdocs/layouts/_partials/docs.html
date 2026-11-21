@@ -1,0 +1,35 @@
+{{ $toc := .TableOfContents }}
+{{ $hasToc := and (ne .Params.toc false) (strings.Contains $toc "<li>") }}
+<div class="docs{{ if not $hasToc }} no-toc{{ end }}">
+  {{ partial "sidebar.html" . }}
+  <main class="content" id="main">
+    <article class="prose">
+      {{ $crumbs := slice }}
+      {{ range .Ancestors.Reverse }}{{ if not .IsHome }}{{ $crumbs = $crumbs | append . }}{{ end }}{{ end }}
+      {{ with $crumbs }}<div class="breadcrumb">{{ range $i, $p := . }}{{ if $i }} / {{ end }}<a href="{{ $p.RelPermalink }}">{{ $p.LinkTitle }}</a>{{ end }}</div>{{ end }}
+      <h1>{{ .Title }}</h1>
+      {{ if not .Params.hideDescription }}{{ with .Description }}<p class="description">{{ . | markdownify }}</p>{{ end }}{{ end }}
+      {{ .Content }}
+      {{ if and .IsSection (ne .Params.cards false) .Pages }}
+        <div class="card-list">
+          {{ range .Pages.ByWeight }}
+            <a href="{{ .RelPermalink }}"><strong>{{ .LinkTitle }}</strong>{{ with .Description }}<span>{{ . | plainify | truncate 110 }}</span>{{ end }}</a>
+          {{ end }}
+        </div>
+      {{ end }}
+    </article>
+    {{ $all := partial "flatpages.html" . }}
+    {{ $idx := -1 }}
+    {{ range $i, $p := $all }}{{ if eq $p.RelPermalink $.RelPermalink }}{{ $idx = $i }}{{ end }}{{ end }}
+    {{ if ge $idx 0 }}
+      <nav class="pager" aria-label="Pages">
+        {{ if gt $idx 0 }}{{ with index $all (sub $idx 1) }}<a class="prev" href="{{ .RelPermalink }}"><small>Previous</small>{{ .LinkTitle }}</a>{{ end }}{{ end }}
+        {{ if lt (add $idx 1) (len $all) }}{{ with index $all (add $idx 1) }}<a class="next" href="{{ .RelPermalink }}"><small>Next</small>{{ .LinkTitle }}</a>{{ end }}{{ end }}
+      </nav>
+    {{ end }}
+    {{ if and site.Params.repo site.Params.contentPath (not .Params.generated) }}{{ with .File }}
+      <p class="edit-link"><a href="{{ site.Params.repo }}/edit/main/{{ site.Params.contentPath }}/{{ .Path }}">Edit this page on GitHub</a></p>
+    {{ end }}{{ end }}
+  </main>
+  {{ if $hasToc }}<nav class="toc" aria-label="On this page"><h4>On this page</h4>{{ $toc }}</nav>{{ end }}
+</div>
