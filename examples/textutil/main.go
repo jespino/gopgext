@@ -3,6 +3,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -112,6 +113,16 @@ func Levenshtein(a, b string) int32 {
 func Sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// RandomBytes returns n bytes from crypto/rand (PostgreSQL's
+// pg_strong_random).
+//
+//gopgext:function parallel=safe
+func RandomBytes(n int32) []byte {
+	b := make([]byte, n)
+	rand.Read(b)
+	return b
 }
 
 // JSONKeys returns the sorted keys of a JSON object, with Go's encoding/json.

@@ -13,7 +13,7 @@ var update = flag.Bool("update", false, "rewrite the golden files in testdata")
 // TestGenGolden checks the generated Go and SQL against testdata/*.golden;
 // go test -run TestGenGolden -update rewrites them.
 func TestGenGolden(t *testing.T) {
-	funcs, err := scanFile("main.go", []byte(`package main
+	pkg, err := scanFile("main.go", []byte(`package main
 
 import (
 	"iter"
@@ -58,20 +58,20 @@ func Echo(s *pg.CString) pg.CString { return "" }
 	if err != nil {
 		t.Fatal(err)
 	}
-	sql, err := genSQL("ext", "example.com/ext", funcs, [][]byte{[]byte("-- framework")}, t.TempDir())
+	sql, err := genSQL("ext", "example.com/ext", pkg, [][]byte{[]byte("-- framework")}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	goSrc, err := genGo(funcs)
+	goSrc, err := genGo(pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, got := range map[string][]byte{
 		"gen.go.golden":      goSrc,
 		"gen.sql.golden":     sql,
-		"gen.c.golden":       genC(funcs),
-		"exports.map.golden": genExports(funcs, []string{"my_handler"}),
-		"control.golden":     genControl("ext", "1.0", "It's an extension", true),
+		"gen.c.golden":       genC(pkg.Funcs),
+		"exports.map.golden": genExports(pkg.Funcs, []string{"my_handler"}),
+		"control.golden":     genControl("ext", "1.0", "It's an extension", true, nil),
 	} {
 		path := filepath.Join("testdata", name)
 		if *update {

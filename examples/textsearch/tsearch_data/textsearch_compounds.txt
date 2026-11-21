@@ -1,0 +1,6 @@
+# Compound words and their parts (gopgext/tsearch ReadConfigFile).
+footBALL foot ball
+doorbell door bell
+
+sunflower sun flower
+orphan

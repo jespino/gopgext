@@ -29,6 +29,7 @@ struct gopgext_spi_result
 	const char **colnames;
 	int64	   *coltypes;
 	struct gopgext_value *values;	/* nrows * ncols, row-major */
+	int64	   *coltypmods;
 };
 
 static Datum
@@ -72,6 +73,9 @@ gopgext_param(struct gopgext_value *v, Oid *type, char *null)
 				*type = v->kind == GOPGEXT_TEXT ? TEXTOID : BYTEAOID;
 				return PointerGetDatum(t);
 			}
+		case GOPGEXT_DATUM:
+			*type = (Oid) v->type;
+			return (Datum) v->i;
 		default:
 			*type = v->type ? (Oid) v->type : UNKNOWNOID;
 			*null = 'n';
@@ -194,11 +198,13 @@ gopgext_spi_execute(const char *sql, int64 nargs, struct gopgext_value *args,
 			res->nrows = (int64) SPI_processed;
 			res->colnames = palloc0(sizeof(char *) * (res->ncols + 1));
 			res->coltypes = palloc0(sizeof(int64) * (res->ncols + 1));
+			res->coltypmods = palloc0(sizeof(int64) * (res->ncols + 1));
 			res->values = palloc0(sizeof(struct gopgext_value) * (res->ncols * res->nrows + 1));
 			for (j = 0; j < res->ncols; j++)
 			{
 				res->colnames[j] = pstrdup(NameStr(TupleDescAttr(desc, j)->attname));
 				res->coltypes[j] = SPI_gettypeid(desc, j + 1);
+				res->coltypmods[j] = TupleDescAttr(desc, j)->atttypmod;
 			}
 			for (i = 0; i < res->nrows; i++)
 			{

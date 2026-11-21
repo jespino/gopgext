@@ -29,16 +29,17 @@ import (
 
 // Options configure a build.
 type Options struct {
-	Dir      string // project directory (contains go.mod)
-	OutDir   string // where to write the .so, .control and .sql; default Dir
-	Name     string // extension name; default derived from the go.mod module path
-	Version  string // extension version; default DefaultVersion
-	Comment  string // control file comment
-	Trusted  bool   // control file: trusted (non-superusers with CREATE can install it)
-	PGConfig string // pg_config to build against; default $PG_CONFIG or pg_config in PATH
-	HeapSize string // initial Go heap size; default DefaultHeapSize
-	HeapMax  string // address space reserved for the Go heap; default DefaultHeapMax
-	Verbose  bool   // print commands and their full output
+	Dir      string   // project directory (contains go.mod)
+	OutDir   string   // where to write the .so, .control and .sql; default Dir
+	Name     string   // extension name; default derived from the go.mod module path
+	Version  string   // extension version; default DefaultVersion
+	Comment  string   // control file comment
+	Trusted  bool     // control file: trusted (non-superusers with CREATE can install it)
+	Requires []string // control file: extensions this one depends on (CREATE EXTENSION ... CASCADE installs them)
+	PGConfig string   // pg_config to build against; default $PG_CONFIG or pg_config in PATH
+	HeapSize string   // initial Go heap size; default DefaultHeapSize
+	HeapMax  string   // address space reserved for the Go heap; default DefaultHeapMax
+	Verbose  bool     // print commands and their full output
 	Log      io.Writer
 }
 
@@ -46,9 +47,10 @@ type Options struct {
 type Result struct {
 	Name      string
 	Version   string
-	Library   string // <OutDir>/<name>.so
-	Control   string // <OutDir>/<name>.control
-	Script    string // <OutDir>/<name>--<version>.sql
+	Library   string   // <OutDir>/<name>.so
+	Control   string   // <OutDir>/<name>.control
+	Script    string   // <OutDir>/<name>--<version>.sql
+	DataFiles []string // the project's tsearch_data/ files, for PGConfig.TSearchDir
 	Functions []string
 	PG        *PGConfig
 	WorkDir   string
@@ -74,6 +76,7 @@ func Build(opts Options) (*Result, error) {
 type builder struct {
 	opts       Options
 	ldflags    []string // from //gopgext:ldflags and frameworks
+	aliases    []Alias  // from //gopgext:alias
 	frameworks []string // imported gopgext packages with C glue
 	fwSQL      [][]byte // install SQL of the frameworks
 }
@@ -104,6 +107,11 @@ func (b *builder) run() (*Result, error) {
 	}
 	if !versionRe.MatchString(version) {
 		return nil, fmt.Errorf("invalid extension version %q: use letters, digits, '.', '_' (no '--')", version)
+	}
+	for _, r := range b.opts.Requires {
+		if !sqlNameRe.MatchString(r) || r == name {
+			return nil, fmt.Errorf("invalid required extension %q", r)
+		}
 	}
 	if b.opts.HeapSize == "" {
 		b.opts.HeapSize = DefaultHeapSize
@@ -155,14 +163,18 @@ func (b *builder) run() (*Result, error) {
 
 	// The project is built from a copy, plus the generated wrappers.
 	src := filepath.Join(work, "src")
-	funcs, err := prepareSource(proj, src)
+	pkg, err := prepareSource(proj, src)
 	if err != nil {
 		return nil, err
 	}
+	funcs := pkg.Funcs
 	if b.ldflags, err = scanLDFlags(proj); err != nil {
 		return nil, err
 	}
-	goSrc, err := genGo(funcs)
+	if b.aliases, err = scanAliases(proj); err != nil {
+		return nil, err
+	}
+	goSrc, err := genGo(pkg)
 	if err != nil {
 		return nil, err
 	}
@@ -238,17 +250,44 @@ func (b *builder) run() (*Result, error) {
 	if comment == "" {
 		comment = mod.Path + " (Go extension built with gopgext)"
 	}
-	if err := os.WriteFile(res.Control, genControl(name, version, comment, b.opts.Trusted), 0o644); err != nil {
+	if err := os.WriteFile(res.Control, genControl(name, version, comment, b.opts.Trusted, b.opts.Requires), 0o644); err != nil {
 		return nil, err
 	}
-	script, err := genSQL(name, mod.Path, funcs, b.fwSQL, filepath.Join(proj, SQLDir))
+	script, err := genSQL(name, mod.Path, pkg, b.fwSQL, filepath.Join(proj, SQLDir))
 	if err != nil {
 		return nil, err
 	}
 	if err := os.WriteFile(res.Script, script, 0o644); err != nil {
 		return nil, err
 	}
+	if res.DataFiles, err = DataFiles(filepath.Join(proj, TSearchDataDir)); err != nil {
+		return nil, err
+	}
 	return res, nil
+}
+
+// TSearchDataDir is the project subdirectory whose files (text search
+// dictionaries' rules, synonyms, stop words...) install into
+// $SHAREDIR/tsearch_data.
+const TSearchDataDir = "tsearch_data"
+
+// DataFiles returns the regular files of dir, sorted (none if it doesn't
+// exist).
+func DataFiles(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, e := range entries {
+		if e.Type().IsRegular() && !strings.HasPrefix(e.Name(), ".") {
+			files = append(files, filepath.Join(dir, e.Name()))
+		}
+	}
+	return files, nil
 }
 
 // v1Re finds the SQL-callable functions of C sources: the library exports
@@ -288,6 +327,67 @@ func scanLDFlags(proj string) ([]string, error) {
 		}
 	}
 	return flags, nil
+}
+
+// AliasPragma exports a V1 function of the library under another C
+// symbol, e.g. a framework's support function under the name an existing
+// install script uses:
+//
+//	//gopgext:alias g_cube_consistent=gopgext_gist_consistent
+const AliasPragma = "//gopgext:alias"
+
+// Alias is a C symbol (Name) for the V1 function Target.
+type Alias struct{ Name, Target string }
+
+// scanAliases collects the //gopgext:alias of the project's main package.
+func scanAliases(proj string) ([]Alias, error) {
+	files, err := filepath.Glob(filepath.Join(proj, "*.go"))
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(files)
+	var aliases []Alias
+	seen := map[string]bool{}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			rest, ok := strings.CutPrefix(strings.TrimSpace(line), AliasPragma)
+			if !ok || (rest != "" && rest[0] != ' ' && rest[0] != '\t') {
+				continue
+			}
+			for _, a := range strings.Fields(rest) {
+				name, target, _ := strings.Cut(a, "=")
+				if !identRe.MatchString(name) || !identRe.MatchString(target) || seen[name] || reservedSymbol(name) != "" {
+					return nil, fmt.Errorf("%s:%d: %s: invalid alias %q (use name=target, C identifiers, each name once, not gopgext_...)", f, i+1, AliasPragma, a)
+				}
+				seen[name] = true
+				aliases = append(aliases, Alias{name, target})
+			}
+		}
+	}
+	return aliases, nil
+}
+
+// genAliases generates the V1 functions of aliases (appended to the
+// generated functions.c).
+func genAliases(aliases []Alias) []byte {
+	var b bytes.Buffer
+	for _, a := range aliases {
+		fmt.Fprintf(&b, `
+/* %[1]s: %[2]s (//gopgext:alias) */
+extern Datum %[2]s(PG_FUNCTION_ARGS);
+PG_FUNCTION_INFO_V1(%[1]s);
+Datum
+%[1]s(PG_FUNCTION_ARGS)
+{
+	return %[2]s(fcinfo);
+}
+`, a.Name, a.Target)
+	}
+	return b.Bytes()
 }
 
 // findFrameworks returns the gopgext framework packages (those with C glue
@@ -355,8 +455,11 @@ func (b *builder) writeExt(root *assets.Root, proj, ext, name, version string, h
 			objs = append(objs, strings.TrimSuffix(n, ".c")+".o")
 		}
 	}
-	if err := os.WriteFile(filepath.Join(ext, "functions.c"), genC(funcs), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(ext, "functions.c"), append(genC(funcs), genAliases(b.aliases)...), 0o644); err != nil {
 		return err
+	}
+	for _, a := range b.aliases {
+		cExports = append(cExports, a.Name)
 	}
 	objs = append(objs, "functions.o")
 
@@ -444,11 +547,14 @@ func (b *builder) writeExt(root *assets.Root, proj, ext, name, version string, h
 	if err := os.WriteFile(filepath.Join(ext, "exports.map"), genExports(funcs, cExports), 0o644); err != nil {
 		return err
 	}
+	// -Bsymbolic: calls between the library's exported functions (an alias
+	// calling a framework's V1 function) stay in the library, even when
+	// another gopgext library loaded earlier exports the same name.
 	makefile := fmt.Sprintf(`# Generated by gopgext. go.o is prebuilt by TinyGo.
 MODULE_big = %s
 OBJS = %s
 PG_CPPFLAGS = -I. -I%s
-SHLIB_LINK = -Wl,--version-script=exports.map -Wl,-z,noexecstack %s
+SHLIB_LINK = -Wl,--version-script=exports.map -Wl,-Bsymbolic -Wl,-z,noexecstack %s
 PG_CONFIG = %s
 PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
@@ -482,11 +588,12 @@ func (b *builder) exec(cmd *exec.Cmd) error {
 
 // PGConfig describes the PostgreSQL installation to build for.
 type PGConfig struct {
-	Path      string // pg_config executable
-	Version   string // e.g. "19.0"
-	BinDir    string
-	PkgLibDir string // where libraries are installed
-	ExtDir    string // where control and SQL files are installed
+	Path       string // pg_config executable
+	Version    string // e.g. "19.0"
+	BinDir     string
+	PkgLibDir  string // where libraries are installed
+	ExtDir     string // where control and SQL files are installed
+	TSearchDir string // where text search data files are installed
 }
 
 // FindPGConfig locates pg_config (path, else $PG_CONFIG, else PATH) and
@@ -513,11 +620,12 @@ func FindPGConfig(path string) (*PGConfig, error) {
 		return nil, fmt.Errorf("%s: unexpected output %q", full, out)
 	}
 	pg := &PGConfig{
-		Path:      full,
-		Version:   strings.TrimPrefix(strings.TrimSpace(lines[0]), "PostgreSQL "),
-		BinDir:    strings.TrimSpace(lines[1]),
-		PkgLibDir: strings.TrimSpace(lines[2]),
-		ExtDir:    filepath.Join(strings.TrimSpace(lines[3]), "extension"),
+		Path:       full,
+		Version:    strings.TrimPrefix(strings.TrimSpace(lines[0]), "PostgreSQL "),
+		BinDir:     strings.TrimSpace(lines[1]),
+		PkgLibDir:  strings.TrimSpace(lines[2]),
+		ExtDir:     filepath.Join(strings.TrimSpace(lines[3]), "extension"),
+		TSearchDir: filepath.Join(strings.TrimSpace(lines[3]), "tsearch_data"),
 	}
 	if _, err := os.Stat(filepath.Join(strings.TrimSpace(lines[4]), "postgres.h")); err != nil {
 		return nil, fmt.Errorf("PostgreSQL %s server headers not found in %s: install its server development package",
@@ -578,12 +686,12 @@ func NameFromPath(p string) string {
 	return sb.String()
 }
 
-var validName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+var validName = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 
 // ValidateName checks name can be used as an extension (and library) name.
 func ValidateName(name string) error {
 	if !validName.MatchString(name) || len(name) > 63 {
-		return fmt.Errorf("invalid extension name %q: use lower-case letters, digits and _ (max 63 chars)", name)
+		return fmt.Errorf("invalid extension name %q: use lower-case letters, digits, _ and - (max 63 chars)", name)
 	}
 	switch name {
 	case "go", "runtime", "spi", "functions":

@@ -18,8 +18,9 @@ import (
 //
 // Parameters are referenced as $1, $2, ... and passed as Go values: bool,
 // int, int16, int32, int64, float32, float64, string (text), []byte (bytea),
-// a pointer to one of those (nil is a typed NULL), or nil (NULL of unknown
-// type).
+// a pointer to one of those (nil is a typed NULL), a pg.AnyElement (a value
+// of its type; a nil *pg.AnyElement is a NULL of unknown type), or nil (NULL
+// of unknown type).
 
 // value types exchanged with C (struct gopgext_value).
 const (
@@ -30,6 +31,7 @@ const (
 	kindText
 	kindBytes
 	kindOther
+	kindDatum // parameters: a pg.AnyElement
 )
 
 // Type OIDs (pg_type.h).
@@ -60,6 +62,7 @@ type cresult struct {
 	colnames  unsafe.Pointer // const char **
 	coltypes  unsafe.Pointer // int64 *
 	values    unsafe.Pointer // struct gopgext_value *
+	typmods   unsafe.Pointer // int64 *
 }
 
 //export gopgext_spi_execute
@@ -112,6 +115,13 @@ func toParam(a any) (cvalue, error) {
 		return ptrParam(v, oidText)
 	case *[]byte:
 		return ptrParam(v, oidBytea)
+	case AnyElement:
+		return cvalue{kind: kindDatum, i: int64(v.Datum()), typ: int32(v.Type())}, nil
+	case *AnyElement:
+		if v == nil {
+			return cvalue{kind: kindNull}, nil
+		}
+		return toParam(*v)
 	}
 	return cvalue{}, fmt.Errorf("pg: unsupported query parameter type %T", a)
 }
@@ -144,11 +154,14 @@ func execute(sql string, limit int64, args []any) (*Rows, error) {
 	}
 	names := unsafe.Slice((**byte)(res.colnames), ncols)
 	types := unsafe.Slice((*int64)(res.coltypes), ncols)
+	typmods := unsafe.Slice((*int64)(res.typmods), ncols)
+	rows.typmods = make([]int32, ncols)
 	rows.cols = make([]string, ncols)
 	rows.types = make([]uint32, ncols)
 	for i := range names {
 		rows.cols[i] = core.GoString(names[i])
 		rows.types[i] = uint32(types[i])
+		rows.typmods[i] = int32(typmods[i])
 	}
 	cvals := unsafe.Slice((*cvalue)(res.values), ncols*nrows)
 	rows.vals = make([]value, len(cvals))
@@ -200,6 +213,7 @@ func QueryRow(sql string, args ...any) *Row {
 type Rows struct {
 	cols      []string
 	types     []uint32
+	typmods   []int32
 	vals      []value
 	processed int64
 	cur       int
@@ -218,6 +232,10 @@ func (r *Rows) Columns() []string { return r.cols }
 
 // ColumnTypes returns the type OIDs of the result columns.
 func (r *Rows) ColumnTypes() []uint32 { return r.types }
+
+// ColumnTypmods returns the type modifiers of the result columns (-1 for
+// none, e.g. 14 for varchar(10)): see FormatType.
+func (r *Rows) ColumnTypmods() []int32 { return r.typmods }
 
 // Len returns the number of rows.
 func (r *Rows) Len() int {

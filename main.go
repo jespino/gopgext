@@ -74,6 +74,14 @@ func cmdBuild(args []string, install bool) error {
 	fs.StringVar(&o.Version, "version", build.DefaultVersion, "extension `version`")
 	fs.StringVar(&o.Comment, "comment", "", "control file comment `text`")
 	fs.BoolVar(&o.Trusted, "trusted", false, "mark the extension trusted (non-superusers with CREATE privilege can install it)")
+	fs.Func("requires", "comma-separated `extensions` this one depends on (control file requires)", func(v string) error {
+		for _, r := range strings.Split(v, ",") {
+			if r = strings.TrimSpace(r); r != "" {
+				o.Requires = append(o.Requires, r)
+			}
+		}
+		return nil
+	})
 	fs.StringVar(&o.PGConfig, "pg-config", "", "`pg_config` of the PostgreSQL to build for (default: $PG_CONFIG, else pg_config in PATH)")
 	fs.StringVar(&o.HeapSize, "heap-size", build.DefaultHeapSize, "initial `size` of each backend's garbage-collected Go heap, e.g. 512K, 4M")
 	fs.StringVar(&o.HeapMax, "heap-max", build.DefaultHeapMax, "`size` limit the Go heap can grow to (address space reserved per backend)")
@@ -113,8 +121,20 @@ func cmdBuild(args []string, install bool) error {
 			return err
 		}
 	}
+	for _, f := range res.DataFiles {
+		if err := installFile(f, res.PG.TSearchDir); err != nil {
+			return err
+		}
+	}
 	fmt.Fprintf(os.Stderr, "gopgext: installed into %s and %s\n", res.PG.PkgLibDir, res.PG.ExtDir)
-	fmt.Fprintf(os.Stderr, "  load it with: CREATE EXTENSION %s;\n", res.Name)
+	if len(res.DataFiles) > 0 {
+		fmt.Fprintf(os.Stderr, "gopgext: installed %d text search data files into %s\n", len(res.DataFiles), res.PG.TSearchDir)
+	}
+	ident := res.Name
+	if strings.Contains(ident, "-") {
+		ident = `"` + ident + `"`
+	}
+	fmt.Fprintf(os.Stderr, "  load it with: CREATE EXTENSION %s;\n", ident)
 	fmt.Fprintf(os.Stderr, "  (sessions that already loaded an older %s.so keep using it: reconnect)\n", res.Name)
 	return nil
 }

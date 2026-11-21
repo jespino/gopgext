@@ -77,21 +77,45 @@ void		gopgext_fatal(void);
 int64		gopgext_monotonic_ns(void);
 int64		gopgext_realtime_ns(void);
 void		gopgext_sleep_us(int64 us);
+bool		gopgext_strong_random(void *buf, unsigned long len);
 ErrorData  *gopgext_check_interrupts(void);
 ErrorData  *gopgext_set_config(const char *name, const char *value, bool local);
 void		gopgext_error_info(ErrorData *edata, struct gopgext_errinfo *out);
 char	   *gopgext_strdup(const char *p, int64 len);
 ErrorData  *gopgext_log(int64 level, const char *msg, int64 len);
+ErrorData  *gopgext_report(int64 level, const char *text, const char *detail,
+						   const char *hint, int64 flags);
 ErrorData  *gopgext_varlena_get(Datum d, const char **ptr, int64 *len);
 ErrorData  *gopgext_varlena_new(const char *p, int64 len, Datum *out);
 ErrorData  *gopgext_array_get(Datum d, Oid elemtype, int64 *n, Datum **elems, bool **nulls);
 ErrorData  *gopgext_array_new(Oid elemtype, int64 n, Datum *elems, bool *nulls, Datum *out);
 ErrorData  *gopgext_srf_begin(struct gopgext_call *call);
 ErrorData  *gopgext_srf_put(struct gopgext_call *call, Datum value, bool isnull, bool free_value);
+ErrorData  *gopgext_row_form(struct gopgext_call *call, int64 n, Datum *values, bool *nulls, Datum *out);
+ErrorData  *gopgext_result_elemtype(struct gopgext_call *call, int64 column, Oid *out);
+ErrorData  *gopgext_row_get(Datum d, int64 n, Datum *values, bool *nulls, Oid *types);
+ErrorData  *gopgext_arg_type(struct gopgext_call *call, int64 i, Oid *out);
+ErrorData  *gopgext_any_out(Oid typ, Datum d, char **out);
+ErrorData  *gopgext_float8_out(double x, char **out);
+ErrorData  *gopgext_any_in(Oid typ, char *s, Datum *out);
+ErrorData  *gopgext_array_elemtype(Datum d, Oid *out);
+ErrorData  *gopgext_array_dims(Datum d, int64 *ndim, int32 *dims);
+ErrorData  *gopgext_array_type(Oid elem, Oid *out);
+ErrorData  *gopgext_srf_put_row(struct gopgext_call *call, int64 n, Datum *values, bool *nulls, bool *alloc);
 ErrorData  *gopgext_guc_define(int64 kind, const char *name, const char *desc,
 							   int64 ival, double fval, const char *sval,
 							   int64 imin, int64 imax, double fmin, double fmax,
-							   bool superuser, void **storage);
+							   int64 context, const char **options, int64 noptions,
+							   void **storage);
+Oid			gopgext_user_id(void);
+Oid			gopgext_database_id(void);
+bool		gopgext_loaded(void);
+bool		gopgext_preloading(void);
+ErrorData  *gopgext_has_privs_of(const char *role, bool *out);
+int			gopgext_file_read(const char *path, char **data, int64 *len);
+int			gopgext_file_write(const char *path, const char *data, int64 len);
+int			gopgext_file_remove(const char *path);
+const char *gopgext_strerror(int err);
 ErrorData  *gopgext_spi_execute(const char *sql, int64 nargs, struct gopgext_value *args,
 								bool read_only, int64 limit, struct gopgext_spi_result *res);
 
@@ -143,6 +167,7 @@ enum {
 	GOPGEXT_TEXT,
 	GOPGEXT_BYTES,
 	GOPGEXT_OTHER,				/* any other type, in its text form */
+	GOPGEXT_DATUM,				/* parameters: a Datum (i) of type type */
 };
 
 #endif

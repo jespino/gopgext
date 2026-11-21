@@ -25,8 +25,15 @@ func TestSnakeCase(t *testing.T) {
 
 func scan(t *testing.T, src string) ([]*Function, error) {
 	t.Helper()
-	return scanFile("main.go", []byte("package main\n\nimport \"iter\"\n\n"+src))
+	pkg, err := scanFile("main.go", []byte("package main\n\nimport \"iter\"\n\n"+src))
+	if err != nil {
+		return nil, err
+	}
+	return pkg.Funcs, nil
 }
+
+// pkgOf wraps the functions of a single-file package without types.
+func pkgOf(funcs []*Function) *Package { return &Package{Funcs: funcs} }
 
 func TestScanSignatures(t *testing.T) {
 	funcs, err := scan(t, `
@@ -111,7 +118,7 @@ func From(order *int32) int32 { return 0 }
 	if err != nil {
 		t.Fatal(err)
 	}
-	sql, err := genSQL("ext", "example.com/ext", funcs, nil, t.TempDir())
+	sql, err := genSQL("ext", "example.com/ext", pkgOf(funcs), nil, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +133,7 @@ func From(order *int32) int32 { return 0 }
 			t.Errorf("SQL lacks %q:\n%s", want, sql)
 		}
 	}
-	goBytes, err := genGo(funcs)
+	goBytes, err := genGo(pkgOf(funcs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,10 +147,13 @@ func TestNames(t *testing.T) {
 	if NameFromPath("github.com/x/My-Ext") != "my_ext" {
 		t.Error(NameFromPath("github.com/x/My-Ext"))
 	}
-	for _, bad := range []string{"", "1abc", "Abc", "spi", strings.Repeat("a", 64)} {
+	for _, bad := range []string{"", "1abc", "Abc", "spi", "-x", "a.b", strings.Repeat("a", 64)} {
 		if ValidateName(bad) == nil {
 			t.Errorf("ValidateName(%q) accepted", bad)
 		}
+	}
+	if ValidateName("uuid-ossp") != nil {
+		t.Error("ValidateName(uuid-ossp)")
 	}
 	if parseSize("4M") != 4<<20 || parseSize("1G") != 1<<30 || parseSize("65536") != 65536 {
 		t.Error("parseSize")
@@ -151,7 +161,7 @@ func TestNames(t *testing.T) {
 }
 
 func TestManualSymbolsAndCString(t *testing.T) {
-	funcs, err := scanFile("main.go", []byte(`package main
+	pkg, err := scanFile("main.go", []byte(`package main
 
 import "gopgext/pg"
 
@@ -167,6 +177,9 @@ func Echo(s *pg.CString) string { return "" }
 	if err != nil {
 		t.Fatal(err)
 	}
+	funcs := pkg.Funcs
+	if false {
+	}
 	in, out, echo := funcs[0], funcs[1], funcs[2]
 	if in.Symbol != "thing_in" || !in.Manual || in.Params[0].Type.SQL() != "cstring" {
 		t.Errorf("thing_in: %+v", in)
@@ -174,7 +187,7 @@ func Echo(s *pg.CString) string { return "" }
 	if out.Result.SQL() != "cstring" || echo.Params[0].Type.Kind != Nullable || echo.Symbol != "gopgext_fn_Echo" {
 		t.Errorf("thing_out/echo: %+v %+v", out, echo)
 	}
-	sql, err := genSQL("ext", "ext", funcs, nil, t.TempDir())
+	sql, err := genSQL("ext", "ext", pkgOf(funcs), nil, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,14 +202,16 @@ func Echo(s *pg.CString) string { return "" }
 	if !strings.Contains(exp, "thing_in;") || !strings.Contains(exp, "pg_finfo_thing_out;") || !strings.Contains(exp, "pg_finfo_my_handler;") {
 		t.Errorf("exports:\n%s", exp)
 	}
-	if goSrc, err := genGo(funcs); err != nil || !strings.Contains(string(goSrc), "_gopgext_fmgr.Arg[_gopgext_fmgr.CString](_c, 0") {
+	if goSrc, err := genGo(pkgOf(funcs)); err != nil || !strings.Contains(string(goSrc), "_gopgext_fmgr.Arg[_gopgext_fmgr.CString](_c, 0") {
 		t.Errorf("Go wrapper (%v):\n%s", err, goSrc)
 	}
 
 	for _, tc := range []struct{ src, want string }{
 		{"//gopgext:function symbol=gopgext_x\nfunc F() {}", "prefix is reserved"},
 		{"//gopgext:function symbol=a\nfunc F() {}\n//gopgext:function symbol=a\nfunc G() {}", ""},
-		{"//gopgext:function\nfunc F(s []pg.CString) {}", "arrays of pg.CString"},
+		{"//gopgext:function\nfunc F(s []pg.Internal) {}", "can't be array elements"},
+		{"//gopgext:function\nfunc F(s *pg.StringInfo) {}", "can't be pointers"},
+		{"//gopgext:function\nfunc F() pg.StringInfo { return pg.StringInfo{} }", "can't be a result"},
 	} {
 		dir := t.TempDir()
 		src := "package main\n\nimport \"gopgext/pg\"\n\n" + tc.src
@@ -227,5 +242,31 @@ func TestLDFlags(t *testing.T) {
 	}
 	if m := v1Re.FindAllStringSubmatch("PG_FUNCTION_INFO_V1(my_fdw_handler);\n  PG_FUNCTION_INFO_V1( other );", -1); len(m) != 2 || m[1][1] != "other" {
 		t.Errorf("v1Re: %q", m)
+	}
+}
+
+func TestAliases(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.go"), []byte("package main\n\n//gopgext:alias g_consistent=gopgext_gist_consistent g_union=gopgext_gist_union\n"), 0o644)
+	aliases, err := scanAliases(dir)
+	if err != nil || len(aliases) != 2 || aliases[1] != (Alias{"g_union", "gopgext_gist_union"}) {
+		t.Fatalf("got %v, %v", aliases, err)
+	}
+	c := string(genAliases(aliases))
+	if !strings.Contains(c, "PG_FUNCTION_INFO_V1(g_consistent);") || !strings.Contains(c, "return gopgext_gist_consistent(fcinfo);") {
+		t.Errorf("genAliases:\n%s", c)
+	}
+	for _, bad := range []string{"g_union", "x=", "gopgext_x=y", "a-b=c"} {
+		os.WriteFile(filepath.Join(dir, "b.go"), []byte("package main\n//gopgext:alias "+bad+"\n"), 0o644)
+		if _, err := scanAliases(dir); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}
+
+func TestControlRequires(t *testing.T) {
+	got := string(genControl("earthdistance", "1.2", "x", false, []string{"cube", "seg"}))
+	if !strings.Contains(got, "requires = 'cube, seg'\n") {
+		t.Errorf("control file:\n%s", got)
 	}
 }

@@ -14,6 +14,8 @@ BEGIN
 	ASSERT levenshtein('kitten', 'sitting') = 3;
 	ASSERT levenshtein('', 'añb') = 3;
 	ASSERT sha256_hex('abc') = encode(sha256('abc'), 'hex');
+	ASSERT length(random_bytes(32)) = 32 AND random_bytes(16) <> random_bytes(16);
+	ASSERT (SELECT count(DISTINCT random_bytes(8)) FROM generate_series(1, 1000)) = 1000;
 	ASSERT json_keys('{"b": 1, "a": [2], "c": {}}') = ARRAY['a', 'b', 'c'];
 	ASSERT person_json('Ana', 30, ARRAY['x', 'y'])::jsonb = '{"name": "Ana", "age": 30, "tags": ["x", "y"]}'::jsonb;
 	ASSERT person_json('Bo', 1, '{}') = '{"name":"Bo","age":1}', person_json('Bo', 1, '{}');

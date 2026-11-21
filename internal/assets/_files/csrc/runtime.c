@@ -12,19 +12,28 @@
 #include <sys/mman.h>
 #include <time.h>
 
+#include <sys/stat.h>
+#include <unistd.h>
+
+#include "access/htup_details.h"
 #include "fmgr.h"
 #include "funcapi.h"
+#include "lib/stringinfo.h"
 #include "miscadmin.h"
 #include "catalog/pg_type.h"
 #if PG_VERSION_NUM >= 160000
 #include "nodes/miscnodes.h"
 #endif
+#include "storage/fd.h"
+#include "utils/acl.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/float.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/tuplestore.h"
+#include "utils/typcache.h"
 
 #include "gopgext.h"
 
@@ -46,8 +55,13 @@ StaticAssertDecl(sizeof(struct gopgext_call) == 72, "gopgext_call layout");
 StaticAssertDecl(sizeof(struct gopgext_value) == 40, "gopgext_value layout");
 /* fmgr reads arguments straight from FunctionCallInfo. */
 StaticAssertDecl(offsetof(FunctionCallInfoBaseData, args) == 32, "fcinfo layout");
+StaticAssertDecl(offsetof(FunctionCallInfoBaseData, nargs) == 30, "fcinfo layout");
 StaticAssertDecl(sizeof(NullableDatum) == 16, "NullableDatum layout");
 StaticAssertDecl(sizeof(Datum) == 8, "64-bit Datum");
+/* pg.StringInfo reads StringInfoData directly. */
+StaticAssertDecl(offsetof(StringInfoData, data) == 0, "StringInfoData layout");
+StaticAssertDecl(offsetof(StringInfoData, len) == 8, "StringInfoData layout");
+StaticAssertDecl(offsetof(StringInfoData, cursor) == 16, "StringInfoData layout");
 
 /* ---- Errors -------------------------------------------------------- */
 
@@ -286,6 +300,17 @@ gopgext_sleep_us(int64 us)
 }
 
 /*
+ * crypto/rand, the runtime's random seed and crypto/internal/sysrand read
+ * PostgreSQL's strong random source (OpenSSL's RAND_bytes or /dev/urandom).
+ * Never raises an error.
+ */
+bool
+gopgext_strong_random(void *buf, unsigned long len)
+{
+	return pg_strong_random(buf, (size_t) len);
+}
+
+/*
  * CHECK_FOR_INTERRUPTS() for Go: processes pending interrupts. Benign ones
  * (barriers, stats, ...) are handled and NULL is returned; a query cancel or
  * timeout error is caught, becomes the pending error (re-thrown when the call
@@ -383,6 +408,20 @@ gopgext_log(int64 level, const char *msg, int64 len)
 	GOPGEXT_GUARD(ereport(elevel, (errmsg_internal("%.*s", (int) len, msg))));
 }
 
+/* pg.Message.Report. Levels: see pg/message.go; flags: 1 errhidestmt, 2 errhidecontext. */
+ErrorData *
+gopgext_report(int64 level, const char *text, const char *detail, const char *hint, int64 flags)
+{
+	static const int levels[] = {DEBUG5, DEBUG4, DEBUG3, DEBUG2, DEBUG1, LOG, INFO, NOTICE, WARNING};
+
+	GOPGEXT_GUARD(ereport(levels[level],
+						  (errmsg_internal("%s", text),
+						   detail ? errdetail_internal("%s", detail) : 0,
+						   hint ? errhint("%s", hint) : 0,
+						   errhidestmt((flags & 1) != 0),
+						   errhidecontext((flags & 2) != 0))));
+}
+
 /* SET name = value (SET LOCAL if local), like set_config(). */
 ErrorData *
 gopgext_set_config(const char *name, const char *value, bool local)
@@ -438,7 +477,9 @@ gopgext_array_get(Datum d, Oid elemtype, int64 *n, Datum **elems, bool **nulls)
 		char		align;
 		int			count;
 
-		if (ARR_ELEMTYPE(a) != elemtype)
+		if (elemtype == InvalidOid)
+			elemtype = ARR_ELEMTYPE(a);	/* checked by the caller's signature */
+		else if (ARR_ELEMTYPE(a) != elemtype)
 			elog(ERROR, "array has element type %u, expected %u", ARR_ELEMTYPE(a), elemtype);
 		get_typlenbyvalalign(elemtype, &typlen, &byval, &align);
 		deconstruct_array(a, elemtype, typlen, byval, align, elems, nulls, &count);
@@ -520,6 +561,219 @@ gopgext_srf_put(struct gopgext_call *call, Datum value, bool isnull, bool free_v
 	});
 }
 
+/* ---- Composite results ------------------------------------------------ */
+
+static void
+gopgext_check_natts(TupleDesc desc, int64 n)
+{
+	if (desc->natts != n)
+		ereport(ERROR,
+				(errcode(ERRCODE_DATATYPE_MISMATCH),
+				 errmsg("function returns %d columns, but the Go result has %d fields",
+						desc->natts, (int) n)));
+}
+
+/* A composite result (function with OUT parameters) from n column values. */
+ErrorData *
+gopgext_row_form(struct gopgext_call *call, int64 n, Datum *values, bool *nulls, Datum *out)
+{
+	GOPGEXT_GUARD({
+		TupleDesc	desc;
+
+		if (get_call_result_type(call->fcinfo, NULL, &desc) != TYPEFUNC_COMPOSITE)
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("function returning a row called in context that cannot accept type record")));
+		gopgext_check_natts(desc, n);
+		desc = BlessTupleDesc(desc);
+		*out = HeapTupleGetDatum(heap_form_tuple(desc, values, nulls));
+	});
+}
+
+/* A row of a function returning a table. Values marked alloc are freed. */
+ErrorData *
+gopgext_srf_put_row(struct gopgext_call *call, int64 n, Datum *values, bool *nulls, bool *alloc)
+{
+	GOPGEXT_GUARD({
+		struct gopgext_srf *srf = call->srf;
+
+		gopgext_check_natts(srf->desc, n);
+		tuplestore_putvalues(srf->store, srf->desc, values, nulls);
+		for (int i = 0; i < n; i++)
+			if (alloc[i] && !nulls[i])
+				pfree(DatumGetPointer(values[i]));
+	});
+}
+
+/* ---- Extension-defined, composite and polymorphic types --------------- */
+
+/* The element type of an array type (an error if it isn't one). */
+static Oid
+gopgext_elem_of(Oid arraytype)
+{
+	Oid			elem = get_element_type(arraytype);
+
+	if (!OidIsValid(elem))
+		ereport(ERROR,
+				(errcode(ERRCODE_DATATYPE_MISMATCH),
+				 errmsg("type %s is not an array type", format_type_be(arraytype))));
+	return elem;
+}
+
+/*
+ * The element type of the array result of the function being called
+ * (column < 0), or of column `column` of its row result.
+ */
+ErrorData *
+gopgext_result_elemtype(struct gopgext_call *call, int64 column, Oid *out)
+{
+	GOPGEXT_GUARD({
+		FunctionCallInfo fcinfo = call->fcinfo;
+		TupleDesc	desc;
+
+		if (fcinfo == NULL || fcinfo->flinfo == NULL)
+			elog(ERROR, "cannot determine the result type of this call");
+		if (column < 0)
+			*out = gopgext_elem_of(get_func_rettype(fcinfo->flinfo->fn_oid));
+		else
+		{
+			if (call->srf)
+				desc = ((struct gopgext_srf *) call->srf)->desc;
+			else if (get_call_result_type(fcinfo, NULL, &desc) != TYPEFUNC_COMPOSITE)
+				elog(ERROR, "function does not return a row");
+			if (column >= desc->natts)
+				elog(ERROR, "result has no column %d", (int) column + 1);
+			*out = gopgext_elem_of(TupleDescAttr(desc, column)->atttypid);
+		}
+	});
+}
+
+/*
+ * The n columns of a composite value (dropped columns skipped), with their
+ * types. By-reference values point into the value: valid during the call.
+ */
+ErrorData *
+gopgext_row_get(Datum d, int64 n, Datum *values, bool *nulls, Oid *types)
+{
+	GOPGEXT_GUARD({
+		HeapTupleHeader th = DatumGetHeapTupleHeader(d);
+		TupleDesc	desc = lookup_rowtype_tupdesc(HeapTupleHeaderGetTypeId(th),
+												  HeapTupleHeaderGetTypMod(th));
+		HeapTupleData tuple;
+		Datum	   *all = palloc(sizeof(Datum) * Max(desc->natts, 1));
+		bool	   *allnulls = palloc(sizeof(bool) * Max(desc->natts, 1));
+		int			j = 0;
+
+		tuple.t_len = HeapTupleHeaderGetDatumLength(th);
+		ItemPointerSetInvalid(&tuple.t_self);
+		tuple.t_tableOid = InvalidOid;
+		tuple.t_data = th;
+		heap_deform_tuple(&tuple, desc, all, allnulls);
+		for (int i = 0; i < desc->natts; i++)
+		{
+			Form_pg_attribute att = TupleDescAttr(desc, i);
+
+			if (att->attisdropped)
+				continue;
+			if (j == n)
+			{
+				j++;
+				break;
+			}
+			values[j] = all[i];
+			nulls[j] = allnulls[i];
+			types[j] = att->atttypid;
+			j++;
+		}
+		ReleaseTupleDesc(desc);
+		if (j != n)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATATYPE_MISMATCH),
+					 errmsg("composite argument doesn't have the %d columns of its Go struct",
+							(int) n)));
+	});
+}
+
+/* The actual type of argument i (polymorphic arguments). */
+ErrorData *
+gopgext_arg_type(struct gopgext_call *call, int64 i, Oid *out)
+{
+	GOPGEXT_GUARD({
+		Oid			typ = InvalidOid;
+
+		if (call->fcinfo && call->fcinfo->flinfo)
+			typ = get_fn_expr_argtype(call->fcinfo->flinfo, (int) i);
+		if (!OidIsValid(typ))
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("could not determine the type of polymorphic argument %d", (int) i + 1)));
+		*out = typ;
+	});
+}
+
+/* The text form of a value (the type's output function). */
+ErrorData *
+gopgext_any_out(Oid typ, Datum d, char **out)
+{
+	GOPGEXT_GUARD({
+		Oid			fn;
+		bool		varlena;
+
+		getTypeOutputInfo(typ, &fn, &varlena);
+		*out = OidOutputFunctionCall(fn, d);
+	});
+}
+
+/* x as float8's output function writes it (pg.FormatFloat8). */
+ErrorData *
+gopgext_float8_out(double x, char **out)
+{
+	GOPGEXT_GUARD(*out = float8out_internal(x));
+}
+
+/* A value of type typ from its text form (the type's input function). */
+ErrorData *
+gopgext_any_in(Oid typ, char *s, Datum *out)
+{
+	GOPGEXT_GUARD({
+		Oid			fn;
+		Oid			ioparam;
+
+		getTypeInputInfo(typ, &fn, &ioparam);
+		*out = OidInputFunctionCall(fn, s, ioparam, -1);
+	});
+}
+
+ErrorData *
+gopgext_array_elemtype(Datum d, Oid *out)
+{
+	GOPGEXT_GUARD(*out = ARR_ELEMTYPE(DatumGetArrayTypeP(d)));
+}
+
+/* Number of dimensions (0 for an empty array) and their lengths (up to MAXDIM). */
+ErrorData *
+gopgext_array_dims(Datum d, int64 *ndim, int32 *dims)
+{
+	GOPGEXT_GUARD({
+		ArrayType  *a = DatumGetArrayTypeP(d);
+
+		*ndim = ARR_NDIM(a);
+		memcpy(dims, ARR_DIMS(a), ARR_NDIM(a) * sizeof(int));
+	});
+}
+
+ErrorData *
+gopgext_array_type(Oid elem, Oid *out)
+{
+	GOPGEXT_GUARD({
+		*out = get_array_type(elem);
+		if (!OidIsValid(*out))
+			ereport(ERROR,
+					(errcode(ERRCODE_UNDEFINED_OBJECT),
+					 errmsg("type %s has no array type", format_type_be(elem))));
+	});
+}
+
 /* ---- Settings (GUCs) ------------------------------------------------- */
 
 static char *
@@ -529,17 +783,25 @@ gopgext_permanent(const char *s)
 }
 
 /*
- * Defines a custom setting; kind: 0 bool, 1 int, 2 real, 3 string. Returns
- * the storage the setting's current value is kept in (*storage).
+ * Defines a custom setting; kind: 0 bool, 1 int, 2 real, 3 string, 4 enum
+ * (ival: the default's index in options, which has noptions names);
+ * context: 0 PGC_USERSET, 1 PGC_SUSET, 2 PGC_SIGHUP, 3 PGC_POSTMASTER, plus
+ * the unit << 8 (1 B, 2 kB, 3 ms, 4 s, 5 min; pg/settings.go).
+ * Returns the storage the setting's current value is kept in (*storage).
  */
 ErrorData *
 gopgext_guc_define(int64 kind, const char *name, const char *desc,
 				   int64 ival, double fval, const char *sval,
 				   int64 imin, int64 imax, double fmin, double fmax,
-				   bool superuser, void **storage)
+				   int64 context, const char **options, int64 noptions,
+				   void **storage)
 {
+	static const GucContext contexts[] = {PGC_USERSET, PGC_SUSET, PGC_SIGHUP, PGC_POSTMASTER};
+	static const int units[] = {0, GUC_UNIT_BYTE, GUC_UNIT_KB, GUC_UNIT_MS, GUC_UNIT_S, GUC_UNIT_MIN};
+
 	GOPGEXT_GUARD({
-		GucContext	ctx = superuser ? PGC_SUSET : PGC_USERSET;
+		GucContext	ctx = contexts[context & 0xff];
+		int			flags = units[context >> 8];
 		void	   *p = MemoryContextAllocZero(TopMemoryContext, sizeof(double) + sizeof(char *));
 		char	   *pname = gopgext_permanent(name);
 		char	   *pdesc = gopgext_permanent(desc);
@@ -552,17 +814,163 @@ gopgext_guc_define(int64 kind, const char *name, const char *desc,
 				break;
 			case 1:
 				DefineCustomIntVariable(pname, pdesc, NULL, (int *) p, (int) ival,
-										(int) imin, (int) imax, ctx, 0, NULL, NULL, NULL);
+										(int) imin, (int) imax, ctx, flags, NULL, NULL, NULL);
 				break;
 			case 2:
 				DefineCustomRealVariable(pname, pdesc, NULL, (double *) p, fval,
-										 fmin, fmax, ctx, 0, NULL, NULL, NULL);
+										 fmin, fmax, ctx, flags, NULL, NULL, NULL);
 				break;
-			default:
+			case 3:
 				DefineCustomStringVariable(pname, pdesc, NULL, (char **) p,
 										   gopgext_permanent(sval), ctx, 0, NULL, NULL, NULL);
+				break;
+			default:
+				{
+					struct config_enum_entry *e =
+						MemoryContextAllocZero(TopMemoryContext,
+											   sizeof(*e) * (noptions + 1));
+
+					for (int i = 0; i < noptions; i++)
+					{
+						e[i].name = gopgext_permanent(options[i]);
+						e[i].val = i;
+					}
+					DefineCustomEnumVariable(pname, pdesc, NULL, (int *) p, (int) ival, e,
+											 ctx, 0, NULL, NULL, NULL);
+				}
 				break;
 		}
 		*storage = p;
 	});
+}
+
+/* ---- Session information --------------------------------------------- */
+
+Oid
+gopgext_user_id(void)
+{
+	return GetUserId();
+}
+
+Oid
+gopgext_database_id(void)
+{
+	return MyDatabaseId;
+}
+
+/* Whether the current user has the privileges of a role (by name). */
+ErrorData *
+gopgext_has_privs_of(const char *role, bool *out)
+{
+	GOPGEXT_GUARD({
+		Oid			r = get_role_oid(role, true);
+
+		*out = OidIsValid(r) && has_privs_of_role(GetUserId(), r);
+	});
+}
+
+bool
+gopgext_preloading(void)
+{
+	return gopgext_state == GOPGEXT_LOADING && process_shared_preload_libraries_in_progress;
+}
+
+bool
+gopgext_loaded(void)
+{
+	return gopgext_state == GOPGEXT_LOADED;
+}
+
+/* ---- Files ------------------------------------------------------------- */
+
+/*
+ * Reads a whole file into palloc'd memory. Returns 0 or an errno (ENOENT for
+ * a missing file); never raises errors.
+ */
+int
+gopgext_file_read(const char *path, char **data, int64 *len)
+{
+	FILE	   *f = AllocateFile(path, PG_BINARY_R);
+	struct stat st;
+	char	   *buf;
+	int			err;
+
+	if (f == NULL)
+		return errno ? errno : EMFILE;
+	if (fstat(fileno(f), &st) != 0)
+	{
+		err = errno;
+		FreeFile(f);
+		return err;
+	}
+	buf = palloc_extended(st.st_size + 1, MCXT_ALLOC_HUGE | MCXT_ALLOC_NO_OOM);
+	if (buf == NULL)
+	{
+		FreeFile(f);
+		return ENOMEM;
+	}
+	if (st.st_size > 0 && fread(buf, 1, st.st_size, f) != (size_t) st.st_size)
+	{
+		err = ferror(f) ? errno : EIO;
+		FreeFile(f);
+		pfree(buf);
+		return err ? err : EIO;
+	}
+	FreeFile(f);
+	*data = buf;
+	*len = st.st_size;
+	return 0;
+}
+
+/*
+ * Writes a file atomically: to path.tmp, fsync'd, then renamed over path
+ * (durable_rename). Returns 0 or an errno; never raises errors.
+ */
+int
+gopgext_file_write(const char *path, const char *data, int64 len)
+{
+	char		tmp[MAXPGPATH];
+	FILE	   *f;
+	int			err;
+
+	if (snprintf(tmp, sizeof(tmp), "%s.tmp", path) >= (int) sizeof(tmp))
+		return ENAMETOOLONG;
+	f = AllocateFile(tmp, PG_BINARY_W);
+	if (f == NULL)
+		return errno ? errno : EMFILE;
+	if ((len > 0 && fwrite(data, 1, len, f) != (size_t) len) || fflush(f) != 0 ||
+		pg_fsync(fileno(f)) != 0)
+	{
+		err = errno ? errno : EIO;
+		FreeFile(f);
+		unlink(tmp);
+		return err;
+	}
+	if (FreeFile(f) != 0)
+	{
+		err = errno ? errno : EIO;
+		unlink(tmp);
+		return err;
+	}
+	if (durable_rename(tmp, path, LOG) != 0)
+	{
+		err = errno ? errno : EIO;
+		unlink(tmp);
+		return err;
+	}
+	return 0;
+}
+
+/* Removes a file; 0 or an errno (ENOENT if it didn't exist). */
+int
+gopgext_file_remove(const char *path)
+{
+	return unlink(path) == 0 ? 0 : errno;
+}
+
+/* The message of an errno (copied by Go). */
+const char *
+gopgext_strerror(int err)
+{
+	return strerror(err);
 }

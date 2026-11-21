@@ -6,6 +6,11 @@
 # session). A project can also have:
 #   build-flags   extra gopgext build flags
 #   expect-log    lines that must appear in the server log
+#   preload       (empty file) always load the library through
+#                 shared_preload_libraries (e.g. it uses shared memory)
+# Tests can run commands with \! (e.g. psql in a new session): PATH starts
+# with the server's bin directory, and PGHOST, PGPORT and PGUSER point to
+# the test cluster.
 #
 #   sh test/run.sh [pg_config] [project ...]
 #
@@ -15,7 +20,7 @@ set -eu
 
 PG_CONFIG=${1:-${PG_CONFIG:-pg_config}}
 [ $# -gt 0 ] && shift
-PROJECTS=${*:-$(ls -d examples/*/ test/fixtures/*/ | sed 's|/$||')}
+PROJECTS=${*:-$(ls -d examples/*/ contrib/*/ test/fixtures/*/ | sed 's|/$||')}
 
 BIN=$("$PG_CONFIG" --bindir)
 VER=$("$PG_CONFIG" --version | awk '{print $2}')
@@ -43,11 +48,19 @@ for p in $PROJECTS; do
 	fi
 done
 
+preload=${PRELOAD:-}
+for p in $ok; do
+	if [ -f "$p/preload" ] && ! echo ",$preload," | grep -qF ",$(basename "$p"),"; then
+		preload="${preload:+$preload,}$(basename "$p")"
+	fi
+done
+
 "$BIN/initdb" -D "$DIR/data" -A trust -U postgres -E UTF8 --locale=C >"$DIR/initdb.log" 2>&1
 "$BIN/pg_ctl" -D "$DIR/data" -l "$DIR/server.log" -w \
-	-o "-k $DIR -c listen_addresses= -p $PORT -c shared_preload_libraries=${PRELOAD:-}" start >/dev/null
+	-o "-k $DIR -c listen_addresses= -p $PORT -c shared_preload_libraries=$preload" start >/dev/null
 trap '"$BIN/pg_ctl" -D "$DIR/data" -m fast -w stop >/dev/null' EXIT
 
+export PATH="$BIN:$PATH" PGHOST="$DIR" PGPORT="$PORT" PGUSER=postgres
 for p in $ok; do
 	name=$(basename "$p")
 	"$BIN/createdb" -h "$DIR" -p "$PORT" -U postgres "test_$name"

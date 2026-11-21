@@ -188,9 +188,12 @@ func mirrorTinyGoRoot(sys, dst, overlay string) error {
 // excludedFiles are TinyGo source files (relative to the root) that would
 // otherwise build for our target but conflict with the pgext runtime layer:
 // baremetal_memory.go takes heap and stack bounds from linker-script symbols,
-// which a shared library doesn't have (runtime_pgext.go provides them).
+// which a shared library doesn't have (runtime_pgext.go provides them);
+// rand_norng.go has no source of randomness (runtime_pgext.go seeds the
+// runtime from pg_strong_random).
 var excludedFiles = []string{
 	"src/runtime/baremetal_memory.go",
+	"src/runtime/rand_norng.go",
 }
 
 // excludeFromTarget replaces the symlinked file at p with a copy whose

@@ -13,6 +13,9 @@ var Seq uint64
 // runs statements read-only, as PostgreSQL requires.
 var ReadOnly bool
 
+// FCInfo is the FunctionCallInfo of the innermost call (0 for _PG_init).
+var FCInfo uintptr
+
 var lastSeq uint64
 
 // NextSeq returns a new call number.

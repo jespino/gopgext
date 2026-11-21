@@ -46,6 +46,9 @@ func pgextSleepUs(us int64)
 //export gopgext_heap_reserve
 func pgextHeapReserve(size uintptr) uintptr
 
+//export gopgext_strong_random
+func pgextStrongRandom(buf unsafe.Pointer, n uintptr) bool
+
 // putchar is used by the runtime's println and panic output, and by
 // os.Stdout/os.Stderr. Bytes are collected into a line buffer and sent to the
 // server log one line at a time.
@@ -70,6 +73,13 @@ func flushLine() {
 }
 
 func getchar() byte { return 0 }
+
+// hardwareRand seeds the runtime's random numbers (map hash seeds,
+// math/rand/v2's global source...) from PostgreSQL's strong random source.
+func hardwareRand() (n uint64, ok bool) {
+	ok = pgextStrongRandom(unsafe.Pointer(&n), 8)
+	return n, ok
+}
 
 func buffered() int { return 0 }
 
