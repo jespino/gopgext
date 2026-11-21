@@ -7,6 +7,9 @@ SQL functions, and gopgext supplies everything else: the C glue, the
 (`fmt`, `strings`, `regexp`, `encoding/json`, `crypto/*`, maps, generics,
 `defer`/`recover`, iterators...), and Go code can run queries through SPI.
 
+**New to gopgext?** [TUTORIAL.md](TUTORIAL.md) walks you through building,
+installing and calling a "hello world" extension in a few minutes.
+
 ```sh
 gopgext init hello       # creates hello/go.mod and hello/main.go
 gopgext install hello    # builds hello.so, hello.control, hello--1.0.sql and installs them
