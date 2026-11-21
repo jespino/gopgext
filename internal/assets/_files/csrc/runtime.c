@@ -328,7 +328,12 @@ gopgext_check_interrupts(void)
  * Garbage collector support (TinyGo's asm_amd64.S, which isn't part of the
  * object TinyGo emits): push the callee-saved registers so the conservative
  * scan finds pointers held in them, then scan from the stack pointer up.
- * tinygo_longjmp resumes at a deferred call's landing pad after a panic.
+ * tinygo_longjmp resumes at a deferred call's landing pad after a panic:
+ * the frame holds {jumpSP, jumpPC, frame pointer}. TinyGo keeps frame
+ * pointers on linux/amd64 and saves rbp in the defer frame
+ * (tinygo-org/tinygo 4a47cfde), so restore it, or a function that recovers
+ * a panic keeps running with the wrong frame pointer. TinyGo before 0.45
+ * lists rbp as clobbered by setjmp, so restoring it is harmless there.
  */
 asm(".pushsection .text.tinygo_scanCurrentStack,\"ax\",@progbits\n"
 	".globl tinygo_scanCurrentStack\n"
@@ -354,6 +359,7 @@ asm(".pushsection .text.tinygo_scanCurrentStack,\"ax\",@progbits\n"
 	".type tinygo_longjmp,@function\n"
 	"tinygo_longjmp:\n"
 	"\tmovq 0(%rdi), %rsp\n"
+	"\tmovq 16(%rdi), %rbp\n"
 	"\tmovq 8(%rdi), %rax\n"
 	"\tjmpq *%rax\n"
 	".size tinygo_longjmp, .-tinygo_longjmp\n"
