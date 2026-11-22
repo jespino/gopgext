@@ -29,9 +29,7 @@ pg_config --version
 ## 2. Install gopgext
 
 ```sh
-git clone https://github.com/jespino/gopgext
-cd gopgext
-go install .            # puts gopgext in $(go env GOPATH)/bin
+go install github.com/jespino/gopgext@latest
 ```
 
 Make sure `$(go env GOPATH)/bin` is in your `PATH`, then run `gopgext` with

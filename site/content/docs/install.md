@@ -18,13 +18,19 @@ weight: 1
 ## Install gopgext
 
 ```sh
-git clone https://github.com/jespino/gopgext
-cd gopgext
-go install .          # or: make  (builds ./gopgext)
+go install github.com/jespino/gopgext@latest
 ```
 
 `go install` puts `gopgext` in `$(go env GOPATH)/bin`; make sure it's in
 your `PATH`. Then follow the [tutorial](/docs/tutorial/).
+
+To build from source instead:
+
+```sh
+git clone https://github.com/jespino/gopgext
+cd gopgext
+go install .          # or: make  (builds ./gopgext)
+```
 
 A library is built for one PostgreSQL major version, like any C extension:
 build it again for each version you install it into, with `-pg-config`.

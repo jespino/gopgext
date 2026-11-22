@@ -1,5 +1,5 @@
-# Developer targets for gopgext itself. Users just need `go install .` (or
-# `make`) and then `gopgext init` / `gopgext build`.
+# Developer targets for gopgext itself. Users can install with
+# `go install github.com/jespino/gopgext@latest`, then run `gopgext init` / `gopgext build`.
 #
 #   make                          build ./gopgext
 #   make test                     vet + unit tests
