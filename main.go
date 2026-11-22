@@ -14,7 +14,7 @@ import (
 	"strings"
 	"text/template"
 
-	"gopgext/internal/build"
+	"github.com/jespino/gopgext/internal/build"
 )
 
 const version = "0.1.0"

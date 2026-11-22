@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gopgext/internal/assets"
+	"github.com/jespino/gopgext/internal/assets"
 )
 
 // Options configure a build.
