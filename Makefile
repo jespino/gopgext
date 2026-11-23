@@ -19,7 +19,7 @@ PRELOADED = $(addprefix examples/,hello types inventory textutil numbers_fdw vec
 	dict_int dict_xsyn unaccent hstore citext \
 	tablefunc uuid-ossp tsm_system_rows tsm_system_time \
 	cube earthdistance seg) \
-	examples/triggers $(addprefix contrib/,tcn lo autoinc insert_username moddatetime refint)
+	examples/triggers examples/ticker examples/writebehind $(addprefix contrib/,tcn lo autoinc insert_username moddatetime refint)
 comma := ,
 space := $(subst ,, )
 

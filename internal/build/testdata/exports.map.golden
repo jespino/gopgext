@@ -5,6 +5,7 @@
 		_PG_init;
 		pg_finfo_gopgext_fn_*;
 		gopgext_fn_*;
+		gopgext_export_*;
 		thing_in;
 		pg_finfo_thing_in;
 		my_echo;

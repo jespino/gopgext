@@ -17,7 +17,11 @@ func TestAssets(t *testing.T) {
 		"csrc/values.c", "lib/pg/values.go", "lib/internal/core/values.go",
 		"lib/subscript/subscript.go", "frameworks/subscript/subscript.c",
 		"csrc/record.c", "lib/fmgr/record.go", "lib/pg/record.go", "lib/internal/core/record.go",
-		"lib/tablesample/tablesample.go", "frameworks/tablesample/tablesample.c"} {
+		"lib/tablesample/tablesample.go", "frameworks/tablesample/tablesample.c",
+		"lib/bgworker/bgworker.go", "frameworks/bgworker/bgworker.c",
+		"lib/xact/xact.go", "frameworks/xact/xact.c",
+		"lib/intercept/intercept.go", "frameworks/intercept/intercept.c",
+		"csrc/relation.c", "lib/pg/relation.go"} {
 		if _, err := File(f); err != nil {
 			t.Error(err)
 		}

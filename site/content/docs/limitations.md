@@ -32,6 +32,11 @@ weight: 10
   dynamic shared memory segments or DSA areas); gopgext/hooks: no
   `emit_log_hook`; EXPLAIN output only of finished executions, with
   auto_explain's options (no custom EXPLAIN options or `MEMORY`/`SERIALIZE`).
+- gopgext/bgworker: static workers registered at server start only (no
+  dynamic workers started from SQL); gopgext/intercept: `UPDATE`s only,
+  one handler per extension, and tables with row-level security, other
+  `UPDATE` triggers or inheritance children aren't intercepted (see
+  [its page](/docs/frameworks/intercept/)).
 - Standard library packages that draw randomness from Go's internal
   generator instead of `crypto/rand.Reader` (`crypto/ecdh`, `crypto/ecdsa`,
   `crypto/rsa` key generation, `crypto/mlkem`, ...) don't build: it starts

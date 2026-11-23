@@ -68,6 +68,15 @@ type cresult struct {
 //export gopgext_spi_execute
 func spiExecute(sql *byte, nargs int64, args *cvalue, readOnly bool, limit int64, res *cresult) uintptr
 
+//export gopgext_spi_prepare
+func spiPrepare(sql *byte, nargs int64, args *cvalue, plan *unsafe.Pointer) uintptr
+
+//export gopgext_spi_execute_plan
+func spiExecutePlan(plan unsafe.Pointer, nargs int64, args *cvalue, readOnly bool, limit int64, res *cresult) uintptr
+
+//export gopgext_spi_free_plan
+func spiFreePlan(plan unsafe.Pointer)
+
 // ErrNoRows is returned by Row.Scan when the query returned no rows.
 var ErrNoRows = errors.New("pg: no rows in result set")
 
@@ -135,6 +144,14 @@ func ptrParam[T any](p *T, oid int32) (cvalue, error) {
 
 // execute runs sql and converts the result into Go values.
 func execute(sql string, limit int64, args []any) (*Rows, error) {
+	return run(args, func(n int64, params *cvalue, res *cresult) uintptr {
+		return spiExecute(core.CBytes(sql), n, params, core.ReadOnly, limit, res)
+	})
+}
+
+// run runs a statement with parameters args (exec does) and converts the
+// result into Go values.
+func run(args []any, exec func(n int64, params *cvalue, res *cresult) uintptr) (*Rows, error) {
 	params := make([]cvalue, len(args)+1)
 	for i, a := range args {
 		v, err := toParam(a)
@@ -144,7 +161,7 @@ func execute(sql string, limit int64, args []any) (*Rows, error) {
 		params[i] = v
 	}
 	var res cresult
-	if ed := spiExecute(core.CBytes(sql), int64(len(args)), &params[0], core.ReadOnly, limit, &res); ed != 0 {
+	if ed := exec(int64(len(args)), &params[0], &res); ed != 0 {
 		return nil, core.FromErrorData(ed)
 	}
 	rows := &Rows{processed: res.processed, cur: -1}
@@ -176,6 +193,84 @@ func execute(sql string, limit int64, args []any) (*Rows, error) {
 		rows.vals[i] = v
 	}
 	return rows, nil
+}
+
+// Type OIDs of parameters of prepared statements (Prepare).
+const (
+	OidBool   Oid = oidBool
+	OidBytea  Oid = oidBytea
+	OidInt8   Oid = oidInt8
+	OidInt2   Oid = oidInt2
+	OidInt4   Oid = oidInt4
+	OidText   Oid = oidText
+	OidFloat4 Oid = oidFloat4
+	OidFloat8 Oid = oidFloat8
+)
+
+// Stmt is a prepared statement: parsed and planned once by Prepare, then
+// run any number of times (in any transaction of the session), like
+// PL/pgSQL does with its statements. PostgreSQL replans it when the
+// objects it uses change.
+type Stmt struct {
+	plan  unsafe.Pointer
+	nargs int
+}
+
+// Prepare prepares a statement with parameters $1, $2... of the given
+// types. Text arguments of a parameter of another type are converted with
+// the type's input function (Exec("...", "2026-01-01") for a date); other
+// arguments must have the parameter's type.
+//
+//	stmt, err := pg.Prepare("UPDATE items SET qty = $2 WHERE name = $1", pg.OidText, pg.OidInt4)
+//	...
+//	_, err = stmt.Exec("apple", int32(3))
+func Prepare(sql string, types ...Oid) (*Stmt, error) {
+	params := make([]cvalue, len(types)+1)
+	for i, t := range types {
+		params[i].typ = int32(t)
+	}
+	s := &Stmt{nargs: len(types)}
+	if ed := spiPrepare(core.CBytes(sql), int64(len(types)), &params[0], &s.plan); ed != 0 {
+		return nil, core.FromErrorData(ed)
+	}
+	return s, nil
+}
+
+func (s *Stmt) execute(limit int64, args []any) (*Rows, error) {
+	if s.plan == nil {
+		return nil, errors.New("pg: statement is closed")
+	}
+	if len(args) != s.nargs {
+		return nil, fmt.Errorf("pg: statement has %d parameters, got %d arguments", s.nargs, len(args))
+	}
+	return run(args, func(n int64, params *cvalue, res *cresult) uintptr {
+		return spiExecutePlan(s.plan, n, params, core.ReadOnly, limit, res)
+	})
+}
+
+// Exec runs the statement and returns the number of rows it processed. As
+// with pg.Exec, it runs in a subtransaction.
+func (s *Stmt) Exec(args ...any) (int64, error) {
+	rows, err := s.execute(0, args)
+	if err != nil {
+		return 0, err
+	}
+	return rows.processed, nil
+}
+
+// Query runs the statement and returns its rows.
+func (s *Stmt) Query(args ...any) (*Rows, error) { return s.execute(0, args) }
+
+// QueryRow runs the statement for at most one row.
+func (s *Stmt) QueryRow(args ...any) *Row {
+	rows, err := s.execute(1, args)
+	return &Row{rows: rows, err: err}
+}
+
+// Close frees the statement.
+func (s *Stmt) Close() {
+	spiFreePlan(s.plan)
+	s.plan = nil
 }
 
 // Exec runs a statement and returns the number of rows it processed

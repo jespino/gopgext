@@ -213,3 +213,49 @@ func DefineLate() (msg string) {
 	pg.NewBoolSetting("late", false, "too late")
 	return "defined"
 }
+
+// setQty is prepared once per session, by SetQty.
+var setQty *pg.Stmt
+
+// SetQty sets the quantity of an item with a prepared statement (qty as
+// text: converted by the parameter's input function), and returns the
+// rows updated.
+//
+//gopgext:function
+func SetQty(name string, qty *string) (int64, error) {
+	if setQty == nil {
+		s, err := pg.Prepare("UPDATE items SET qty = $2 WHERE name = $1", pg.OidText, pg.OidInt4)
+		if err != nil {
+			return 0, err
+		}
+		setQty = s
+	}
+	return setQty.Exec(name, qty)
+}
+
+// PrepareErrors returns the errors of a bad statement and of arguments of
+// the wrong type (an int64 for an integer parameter).
+//
+//gopgext:function
+func PrepareErrors() []string {
+	var errs []string
+	if _, err := pg.Prepare("UPDATE nope SET x = $1", pg.OidInt4); err != nil {
+		errs = append(errs, err.Error())
+	}
+	s, err := pg.Prepare("SELECT $1::int + 1", pg.OidInt4)
+	if err != nil {
+		return append(errs, err.Error())
+	}
+	defer s.Close()
+	if _, err := s.Exec(int64(1)); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if _, err := s.Exec(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	var n int32
+	if err := s.QueryRow(int32(41)).Scan(&n); err != nil || n != 42 {
+		errs = append(errs, fmt.Sprint("QueryRow: ", n, err))
+	}
+	return errs
+}

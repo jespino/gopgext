@@ -92,3 +92,27 @@ RESET statement_timeout;
 
 -- the failed statements left no trace; the transaction state is fine
 SELECT count(*) = 5 AS five_items FROM items;
+
+-- prepared statements: text arguments converted, NULL, reuse across calls
+DO $$
+BEGIN
+	ASSERT set_qty('apple', '7') = 1;
+	ASSERT (SELECT qty FROM items WHERE name = 'apple') = 7;
+	ASSERT set_qty('nothing', '1') = 0;
+	BEGIN
+		PERFORM set_qty('apple', NULL);
+		RAISE 'no error';
+	EXCEPTION WHEN not_null_violation THEN
+	END;
+	ASSERT set_qty('apple', '8') = 1;
+END $$;
+DO $$
+DECLARE
+	errs text[] := prepare_errors();
+BEGIN
+	IF cardinality(errs) <> 3 OR errs[1] NOT LIKE '%"nope" does not exist%'
+			OR errs[2] NOT LIKE '%parameter $1 of the prepared statement is integer, not bigint%'
+			OR errs[3] NOT LIKE '%1 parameters, got 0%' THEN
+		RAISE 'prepare_errors: %', errs;
+	END IF;
+END $$;
