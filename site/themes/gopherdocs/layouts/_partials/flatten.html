@@ -1,6 +1,0 @@
-{{- $out := slice -}}
-{{- range .Pages.ByWeight -}}
-  {{- $out = $out | append . -}}
-  {{- if .IsSection -}}{{- $out = $out | append (partial "flatten.html" .) -}}{{- end -}}
-{{- end -}}
-{{- return $out -}}

@@ -11,11 +11,10 @@ package build
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +24,9 @@ import (
 	"strings"
 
 	"github.com/jespino/gopgext/internal/assets"
+	"github.com/jespino/tinyguest/cli"
+	"github.com/jespino/tinyguest/project"
+	"github.com/jespino/tinyguest/toolchain"
 )
 
 // Options configure a build.
@@ -62,18 +64,17 @@ const (
 	DefaultHeapMax  = "1G"
 )
 
-var heapSizeRe = regexp.MustCompile(`^[0-9]+[KMG]?$`)
-
 // Build runs the full pipeline.
 func Build(opts Options) (*Result, error) {
 	if opts.Log == nil {
 		opts.Log = os.Stderr
 	}
-	b := &builder{opts: opts}
+	b := &builder{opts: opts, Runner: &cli.Runner{Tool: "gopgext", Log: opts.Log, Verbose: opts.Verbose}}
 	return b.run()
 }
 
 type builder struct {
+	*cli.Runner
 	opts       Options
 	ldflags    []string // from //gopgext:ldflags and frameworks
 	aliases    []Alias  // from //gopgext:alias
@@ -81,16 +82,16 @@ type builder struct {
 	fwSQL      [][]byte // install SQL of the frameworks
 }
 
-func (b *builder) step(format string, args ...any) {
-	fmt.Fprintf(b.opts.Log, "gopgext: "+format+"\n", args...)
-}
-
 func (b *builder) run() (*Result, error) {
 	proj, err := filepath.Abs(b.opts.Dir)
 	if err != nil {
 		return nil, err
 	}
-	mod, err := ReadGoMod(filepath.Join(proj, "go.mod"))
+	goMod := filepath.Join(proj, "go.mod")
+	mod, err := project.ReadGoMod(goMod, assets.LibGoVersion)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("%s not found (run `gopgext init` first)", goMod)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -119,12 +120,14 @@ func (b *builder) run() (*Result, error) {
 	if b.opts.HeapMax == "" {
 		b.opts.HeapMax = DefaultHeapMax
 	}
-	for _, v := range []string{b.opts.HeapSize, b.opts.HeapMax} {
-		if !heapSizeRe.MatchString(v) {
-			return nil, fmt.Errorf("invalid heap size %q: use bytes or a K/M/G suffix, e.g. 4M", v)
-		}
+	heapSize, err := heapBytes(b.opts.HeapSize)
+	if err != nil {
+		return nil, err
 	}
-	heapSize, heapMax := parseSize(b.opts.HeapSize), parseSize(b.opts.HeapMax)
+	heapMax, err := heapBytes(b.opts.HeapMax)
+	if err != nil {
+		return nil, err
+	}
 	if heapSize < 64<<10 || heapMax < heapSize {
 		return nil, fmt.Errorf("heap size must be at least 64K and no more than the heap max (%s)", b.opts.HeapMax)
 	}
@@ -143,16 +146,16 @@ func (b *builder) run() (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	tgRoot, tgVersion, err := tinygoInfo()
+	tg, err := toolchain.Find()
 	if err != nil {
 		return nil, err
 	}
-	root, err := assets.Prepare(cache, tgRoot, tgVersion)
+	root, err := assets.Prepare(cache, tg)
 	if err != nil {
 		return nil, err
 	}
 
-	work := filepath.Join(cache, "build", shortHash(proj+"\x00"+pg.Path))
+	work := filepath.Join(cache, "build", project.ShortHash(proj+"\x00"+pg.Path))
 	ext := filepath.Join(work, "ext")
 	if err := os.RemoveAll(ext); err != nil {
 		return nil, err
@@ -182,24 +185,26 @@ func (b *builder) run() (*Result, error) {
 		return nil, err
 	}
 	goWork := filepath.Join(work, "go.work")
-	if err := os.WriteFile(goWork, []byte(GoWorkContent(mod.GoVersion, src, root.Lib, false)), 0o644); err != nil {
+	if err := os.WriteFile(goWork, []byte(Workspace.Content(mod.GoVersion, false, src, root.Lib)), 0o644); err != nil {
 		return nil, err
 	}
-	RefreshProjectGoWork(proj, mod.GoVersion, root.Lib)
+	Workspace.Refresh(proj, mod.GoVersion, root.Lib)
 
 	// 1. Go -> object.
-	b.step("compiling Go code with TinyGo %s (%d SQL functions)", shortTinyGoVersion(tgVersion), len(funcs))
+	b.Step("compiling Go code with TinyGo %s (%d SQL functions)", tg.ShortVersion(), len(funcs))
 	rawObj := filepath.Join(work, "go.raw.o")
 	cmd := exec.Command("tinygo", "build", "-target="+root.Target, "-opt=2", "-no-debug", "-o", rawObj, ".")
 	cmd.Dir = src
-	cmd.Env = append(os.Environ(), "TINYGOROOT="+root.TinyGoRoot, "GOWORK="+goWork)
-	if err := b.exec(cmd); err != nil {
+	cmd.Env = toolchain.Env(root.TinyGoRoot, goWork)
+	if err := b.Exec(cmd); err != nil {
 		// Report positions in the project, not in the copy.
 		return nil, errors.New(strings.ReplaceAll(err.Error(), src+string(filepath.Separator), proj+string(filepath.Separator)))
 	}
-	if b.frameworks, err = b.findFrameworks(root, src, cmd.Env); err != nil {
+	deps, err := toolchain.Deps(root.Target, src, cmd.Env)
+	if err != nil {
 		return nil, err
 	}
+	b.frameworks = project.Frameworks(deps, assets.LibModule, root.Frameworks)
 
 	// 2. Strip debug info and make everything but the entry points the C
 	// runtime calls local: Go internals (runtime.alloc, main.main, ...) and
@@ -209,7 +214,7 @@ func (b *builder) run() (*Result, error) {
 	if err := os.WriteFile(keep, []byte(strings.Join(keptSymbols, "\n")+"\n"), 0o644); err != nil {
 		return nil, err
 	}
-	if err := b.exec(exec.Command("objcopy", "--strip-debug", "--wildcard",
+	if err := b.Exec(exec.Command("objcopy", "--strip-debug", "--wildcard",
 		"--keep-global-symbols="+keep, rawObj, filepath.Join(ext, "go.o"))); err != nil {
 		return nil, err
 	}
@@ -218,8 +223,8 @@ func (b *builder) run() (*Result, error) {
 	if err := b.writeExt(root, proj, ext, name, version, heapSize, heapMax, pg, funcs); err != nil {
 		return nil, err
 	}
-	b.step("building %s.so against PostgreSQL %s", name, pg.Version)
-	if err := b.exec(exec.Command("make", "-C", ext, "with_llvm=no")); err != nil {
+	b.Step("building %s.so against PostgreSQL %s", name, pg.Version)
+	if err := b.Exec(exec.Command("make", "-C", ext, "with_llvm=no")); err != nil {
 		return nil, err
 	}
 
@@ -243,7 +248,7 @@ func (b *builder) run() (*Result, error) {
 	for _, f := range funcs {
 		res.Functions = append(res.Functions, f.SQLName)
 	}
-	if err := copyFile(filepath.Join(ext, name+".so"), res.Library, 0o755); err != nil {
+	if err := project.CopyFile(filepath.Join(ext, name+".so"), res.Library, 0o755); err != nil {
 		return nil, err
 	}
 	comment := b.opts.Comment
@@ -390,34 +395,6 @@ Datum
 	return b.Bytes()
 }
 
-// findFrameworks returns the gopgext framework packages (those with C glue
-// in the assets) the project imports, directly or not.
-func (b *builder) findFrameworks(root *assets.Root, dir string, env []string) ([]string, error) {
-	cmd := exec.Command("tinygo", "list", "-target="+root.Target, "-deps", ".")
-	cmd.Dir = dir
-	cmd.Env = env
-	out, err := cmd.Output()
-	if err != nil {
-		var stderr []byte
-		if ee, ok := err.(*exec.ExitError); ok {
-			stderr = ee.Stderr
-		}
-		return nil, fmt.Errorf("listing dependencies: %w\n%s", err, strings.TrimSpace(string(stderr)))
-	}
-	var fws []string
-	for _, line := range strings.Split(string(out), "\n") {
-		pkg, ok := strings.CutPrefix(strings.TrimSpace(line), assets.LibModule+"/")
-		if !ok {
-			continue
-		}
-		if st, err := os.Stat(filepath.Join(root.Frameworks, pkg)); err == nil && st.IsDir() {
-			fws = append(fws, pkg)
-		}
-	}
-	sort.Strings(fws)
-	return fws, nil
-}
-
 // keptSymbols stay global in the Go object: the Go entry points the C side
 // calls. Everything else is made local.
 var keptSymbols = []string{
@@ -448,7 +425,7 @@ func (b *builder) writeExt(root *assets.Root, proj, ext, name, version string, h
 	}
 	for _, e := range entries {
 		n := e.Name()
-		if err := copyFile(filepath.Join(root.CSrc, n), filepath.Join(ext, n), 0o644); err != nil {
+		if err := project.CopyFile(filepath.Join(root.CSrc, n), filepath.Join(ext, n), 0o644); err != nil {
 			return err
 		}
 		if strings.HasSuffix(n, ".c") {
@@ -475,7 +452,7 @@ func (b *builder) writeExt(root *assets.Root, proj, ext, name, version string, h
 			if err := os.MkdirAll(filepath.Join(ext, CSrcDir), 0o755); err != nil {
 				return err
 			}
-			if err := copyFile(filepath.Join(proj, CSrcDir, n), filepath.Join(ext, CSrcDir, n), 0o644); err != nil {
+			if err := project.CopyFile(filepath.Join(proj, CSrcDir, n), filepath.Join(ext, CSrcDir, n), 0o644); err != nil {
 				return err
 			}
 			if strings.HasSuffix(n, ".c") {
@@ -490,7 +467,7 @@ func (b *builder) writeExt(root *assets.Root, proj, ext, name, version string, h
 			}
 		}
 		if len(user) > 0 {
-			b.step("adding C sources from %s/", CSrcDir)
+			b.Step("adding C sources from %s/", CSrcDir)
 			objs = append(objs, user...)
 		}
 	}
@@ -531,7 +508,7 @@ func (b *builder) writeExt(root *assets.Root, proj, ext, name, version string, h
 		}
 	}
 	if len(b.frameworks) > 0 {
-		b.step("using frameworks: gopgext/%s", strings.Join(b.frameworks, ", gopgext/"))
+		b.Step("using frameworks: gopgext/%s", strings.Join(b.frameworks, ", gopgext/"))
 	}
 	sort.Strings(objs[1:])
 
@@ -560,30 +537,6 @@ PGXS := $(shell $(PG_CONFIG) --pgxs)
 include $(PGXS)
 `, name, strings.Join(objs, " "), CSrcDir, strings.Join(b.ldflags, " "), pg.Path)
 	return os.WriteFile(filepath.Join(ext, "Makefile"), []byte(makefile), 0o644)
-}
-
-// exec runs cmd. Output is shown only in verbose mode or when it fails.
-func (b *builder) exec(cmd *exec.Cmd) error {
-	if b.opts.Verbose {
-		fmt.Fprintf(b.opts.Log, "+ %s\n", strings.Join(cmd.Args, " "))
-		cmd.Stdout = b.opts.Log
-		cmd.Stderr = b.opts.Log
-		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("%s failed: %w", filepath.Base(cmd.Path), err)
-		}
-		return nil
-	}
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	if cmd.Env == nil {
-		cmd.Env = os.Environ()
-	}
-	cmd.Env = append(cmd.Env, "LC_ALL=C")
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s failed: %w\n%s", filepath.Base(cmd.Path), err, strings.TrimSpace(buf.String()))
-	}
-	return nil
 }
 
 // PGConfig describes the PostgreSQL installation to build for.
@@ -638,37 +591,7 @@ func FindPGConfig(path string) (*PGConfig, error) {
 	return pg, nil
 }
 
-// GoMod is the subset of go.mod gopgext cares about.
-type GoMod struct {
-	Path      string
-	GoVersion string
-}
-
-var (
-	moduleRe  = regexp.MustCompile(`(?m)^module\s+"?([^\s"]+)"?`)
-	goVerRe   = regexp.MustCompile(`(?m)^go\s+(\S+)`)
-	versionRe = regexp.MustCompile(`^[A-Za-z0-9_.]+$`)
-)
-
-// ReadGoMod parses the module path and go version from a go.mod file.
-func ReadGoMod(path string) (*GoMod, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("%s not found (run `gopgext init` first)", path)
-		}
-		return nil, err
-	}
-	m := moduleRe.FindSubmatch(data)
-	if m == nil {
-		return nil, fmt.Errorf("%s: no module directive", path)
-	}
-	gm := &GoMod{Path: string(m[1]), GoVersion: assets.LibGoVersion}
-	if v := goVerRe.FindSubmatch(data); v != nil {
-		gm.GoVersion = string(v[1])
-	}
-	return gm, nil
-}
+var versionRe = regexp.MustCompile(`^[A-Za-z0-9_.]+$`)
 
 // NameFromPath derives an extension name from a Go module path: last path
 // element, lower-cased, with characters other than letters, digits and _
@@ -702,14 +625,7 @@ func ValidateName(name string) error {
 
 // CacheDir is where gopgext keeps extracted assets and build directories.
 func CacheDir() (string, error) {
-	if d := os.Getenv("GOPGEXTCACHE"); d != "" {
-		return d, nil
-	}
-	d, err := os.UserCacheDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, "gopgext"), nil
+	return toolchain.CacheDir("gopgext", "GOPGEXTCACHE")
 }
 
 // PrepareAssets materializes the assets for the installed TinyGo.
@@ -718,97 +634,27 @@ func PrepareAssets() (*assets.Root, error) {
 	if err != nil {
 		return nil, err
 	}
-	tgRoot, tgVersion, err := tinygoInfo()
+	tg, err := toolchain.Find()
 	if err != nil {
 		return nil, err
 	}
-	return assets.Prepare(cache, tgRoot, tgVersion)
+	return assets.Prepare(cache, tg)
 }
 
-func tinygoInfo() (root, version string, err error) {
-	if _, err := exec.LookPath("tinygo"); err != nil {
-		return "", "", errors.New("tinygo not found in PATH (https://tinygo.org/getting-started/install/)")
-	}
-	out, err := exec.Command("tinygo", "env", "TINYGOROOT").Output()
+// Workspace writes the go.work files that make the gopgext lib module
+// resolvable: in the build directory and, for editors, in the project.
+var Workspace = project.Workspace{Tool: "gopgext", Import: "gopgext/pg"}
+
+// heapBytes parses a heap size flag (e.g. 4M), rounded down to whole pages.
+func heapBytes(s string) (uint64, error) {
+	n, err := project.ParseSize(s)
 	if err != nil {
-		return "", "", fmt.Errorf("tinygo env TINYGOROOT: %w", err)
+		return 0, fmt.Errorf("invalid heap size %q: use bytes or a K/M/G suffix, e.g. 4M", s)
 	}
-	root = strings.TrimSpace(string(out))
-	if os.Getenv("TINYGOROOT") != "" {
-		// Don't stack our overlay on top of a user-provided overlay by accident.
-		root = os.Getenv("TINYGOROOT")
-	}
-	out, err = exec.Command("tinygo", "version").Output()
-	if err != nil {
-		return "", "", fmt.Errorf("tinygo version: %w", err)
-	}
-	return root, strings.TrimSpace(string(out)), nil
-}
-
-// workMarker identifies go.work files written by gopgext.
-const workMarker = "// Generated by gopgext"
-
-// GoWorkContent returns a go.work using the project and the gopgext lib module.
-func GoWorkContent(goVersion, proj, lib string, forEditor bool) string {
-	var sb strings.Builder
-	sb.WriteString(workMarker)
-	if forEditor {
-		sb.WriteString(" so editors can resolve \"gopgext/pg\". `gopgext build`\n// rewrites it when needed; it's machine-specific, don't commit it.")
-	}
-	fmt.Fprintf(&sb, "\n\ngo %s\n\nuse (\n\t%s\n\t%s\n)\n", goVersion, proj, lib)
-	return sb.String()
-}
-
-// RefreshProjectGoWork updates the project's editor go.work if gopgext
-// created it and it points to an outdated asset directory.
-func RefreshProjectGoWork(proj, goVersion, lib string) {
-	p := filepath.Join(proj, "go.work")
-	data, err := os.ReadFile(p)
-	if err != nil || !bytes.HasPrefix(data, []byte(workMarker)) {
-		return
-	}
-	if want := GoWorkContent(goVersion, ".", lib, true); string(data) != want {
-		os.WriteFile(p, []byte(want), 0o644)
-	}
-}
-
-// shortTinyGoVersion turns "tinygo version 0.43.0 linux/amd64 (...)" into "0.43.0".
-func shortTinyGoVersion(v string) string {
-	if f := strings.Fields(v); len(f) >= 3 && f[0] == "tinygo" {
-		return f[2]
-	}
-	return v
-}
-
-// parseSize parses sizes like 8192, 8K, 4M, 1G.
-func parseSize(s string) uint64 {
-	mult := uint64(1)
-	switch {
-	case strings.HasSuffix(s, "K"):
-		mult, s = 1<<10, strings.TrimSuffix(s, "K")
-	case strings.HasSuffix(s, "M"):
-		mult, s = 1<<20, strings.TrimSuffix(s, "M")
-	case strings.HasSuffix(s, "G"):
-		mult, s = 1<<30, strings.TrimSuffix(s, "G")
-	}
-	n, _ := strconv.ParseUint(s, 10, 64)
-	return (n * mult) &^ 4095
+	return n &^ 4095, nil
 }
 
 func cString(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
 	return `"` + r.Replace(s) + `"`
-}
-
-func shortHash(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:])[:16]
-}
-
-func copyFile(src, dst string, mode os.FileMode) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, mode)
 }

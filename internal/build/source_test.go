@@ -155,8 +155,13 @@ func TestNames(t *testing.T) {
 	if ValidateName("uuid-ossp") != nil {
 		t.Error("ValidateName(uuid-ossp)")
 	}
-	if parseSize("4M") != 4<<20 || parseSize("1G") != 1<<30 || parseSize("65536") != 65536 {
-		t.Error("parseSize")
+	for s, want := range map[string]uint64{"4M": 4 << 20, "1G": 1 << 30, "65536": 65536, "5000": 4096} {
+		if got, err := heapBytes(s); err != nil || got != want {
+			t.Errorf("heapBytes(%q) = %d, %v", s, got, err)
+		}
+	}
+	if _, err := heapBytes("4MB"); err == nil {
+		t.Error("heapBytes(4MB) accepted")
 	}
 }
 

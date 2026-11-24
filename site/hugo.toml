@@ -1,7 +1,6 @@
 baseURL = "https://jespino.github.io/gopgext/"
 title = "gopgext"
 locale = "en-US"
-theme = "gopherdocs"
 disableKinds = ["taxonomy", "term", "rss"]
 enableRobotsTXT = true
 
@@ -45,3 +44,7 @@ enableRobotsTXT = true
 [[module.mounts]]
   source = "../assets"
   target = "static/img"
+
+# The gopherdocs theme, shared with the other tinyguest-based tools.
+[[module.imports]]
+  path = "github.com/jespino/tinyguest/theme"

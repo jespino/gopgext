@@ -1,8 +1,0 @@
-{{- $cur := .current -}}
-{{- range .section.Pages.ByWeight -}}
-  {{- $active := eq .RelPermalink $cur.RelPermalink }}
-  <li><a href="{{ .RelPermalink }}"{{ if $active }} class="active" aria-current="page"{{ end }}>{{ .LinkTitle }}</a>
-  {{- if and .IsSection .Pages }}
-    <ul>{{ partial "navtree.html" (dict "section" . "current" $cur) }}</ul>
-  {{- end }}</li>
-{{- end -}}

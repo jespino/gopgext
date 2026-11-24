@@ -15,6 +15,8 @@ import (
 	"text/template"
 
 	"github.com/jespino/gopgext/internal/build"
+	"github.com/jespino/tinyguest/cli"
+	"github.com/jespino/tinyguest/project"
 )
 
 const version = "0.1.0"
@@ -90,7 +92,7 @@ func cmdBuild(args []string, install bool) error {
 		fmt.Fprintf(fs.Output(), "Usage: gopgext %s [flags] [dir]\n", cmd)
 		fs.PrintDefaults()
 	}
-	if err := parseInterspersed(fs, args); err != nil {
+	if err := cli.ParseInterspersed(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() > 1 {
@@ -226,7 +228,7 @@ func cmdInit(args []string) error {
 		fmt.Fprintln(fs.Output(), "Usage: gopgext init [-module path] [dir]")
 		fs.PrintDefaults()
 	}
-	if err := parseInterspersed(fs, args); err != nil {
+	if err := cli.ParseInterspersed(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() > 1 {
@@ -247,24 +249,15 @@ func cmdInit(args []string) error {
 	if err := build.ValidateName(name); err != nil {
 		return fmt.Errorf("%w (derived from module path %q; use -module)", err, *modPath)
 	}
-	for _, f := range []string{"go.mod", "main.go"} {
-		if _, err := os.Stat(filepath.Join(abs, f)); err == nil {
-			return fmt.Errorf("%s already exists in %s", f, abs)
-		}
-	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
-		return err
-	}
 	goVersion := "1.23"
-	goMod := fmt.Sprintf("module %s\n\ngo %s\n", *modPath, goVersion)
-	if err := os.WriteFile(filepath.Join(abs, "go.mod"), []byte(goMod), 0o644); err != nil {
-		return err
-	}
 	var main strings.Builder
 	if err := mainTmpl.Execute(&main, map[string]string{"Name": name}); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(abs, "main.go"), []byte(main.String()), 0o644); err != nil {
+	if err := project.Create(abs, map[string][]byte{
+		"go.mod":  project.GoModFile(*modPath, goVersion),
+		"main.go": []byte(main.String()),
+	}); err != nil {
 		return err
 	}
 
@@ -273,7 +266,7 @@ func cmdInit(args []string) error {
 	if root, err := build.PrepareAssets(); err != nil {
 		fmt.Fprintf(os.Stderr, "gopgext: warning: skipping go.work for editor support: %v\n", err)
 	} else {
-		work := build.GoWorkContent(goVersion, ".", root.Lib, true)
+		work := build.Workspace.Editor(goVersion, root.Lib)
 		if err := os.WriteFile(filepath.Join(abs, "go.work"), []byte(work), 0o644); err != nil {
 			return err
 		}
@@ -284,22 +277,4 @@ func cmdInit(args []string) error {
 	fmt.Fprintf(os.Stderr, "  install:  gopgext install %s   (may need sudo)\n", dir)
 	fmt.Fprintf(os.Stderr, "  use:      CREATE EXTENSION %s; SELECT hello('world');\n", name)
 	return nil
-}
-
-// parseInterspersed parses flags that may appear before or after positional
-// arguments ("gopgext build dir -v").
-func parseInterspersed(fs *flag.FlagSet, args []string) error {
-	var pos []string
-	for {
-		if err := fs.Parse(args); err != nil {
-			return err
-		}
-		args = fs.Args()
-		if len(args) == 0 {
-			break
-		}
-		pos = append(pos, args[0])
-		args = args[1:]
-	}
-	return fs.Parse(pos)
 }
