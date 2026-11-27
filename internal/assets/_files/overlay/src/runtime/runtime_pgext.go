@@ -11,7 +11,9 @@
 // (goroutines aren't available): Go code runs on the backend's own stack,
 // only while PostgreSQL is calling into the extension. Memory is TinyGo's
 // conservative collector over a heap reserved with mmap that grows on
-// demand. Because Go runs on the backend's stack, the collector scans the
+// demand. The target is hosted Linux (GOOS=linux without the baremetal tag),
+// so syscall and os use the backend's libc for files, environment, etc.
+// Because Go runs on the backend's stack, the collector scans the
 // stack from the current position up to the frame of the outermost entry
 // from C (stackTop, set by gopgext_enter).
 
@@ -21,10 +23,6 @@ import (
 	"internal/task"
 	"unsafe"
 )
-
-// Zero-sized allocations return this address: in the first page, which is
-// never mapped in a Linux process.
-const zeroSizeAllocPtr uintptr = 16
 
 // Implemented in csrc/runtime.c.
 //
@@ -45,9 +43,6 @@ func pgextSleepUs(us int64)
 
 //export gopgext_heap_reserve
 func pgextHeapReserve(size uintptr) uintptr
-
-//export gopgext_strong_random
-func pgextStrongRandom(buf unsafe.Pointer, n uintptr) bool
 
 // putchar is used by the runtime's println and panic output, and by
 // os.Stdout/os.Stderr. Bytes are collected into a line buffer and sent to the
@@ -73,13 +68,6 @@ func flushLine() {
 }
 
 func getchar() byte { return 0 }
-
-// hardwareRand seeds the runtime's random numbers (map hash seeds,
-// math/rand/v2's global source...) from PostgreSQL's strong random source.
-func hardwareRand() (n uint64, ok bool) {
-	ok = pgextStrongRandom(unsafe.Pointer(&n), 8)
-	return n, ok
-}
 
 func buffered() int { return 0 }
 
@@ -116,6 +104,67 @@ func sleepTicks(d timeUnit) {
 		us = 1
 	}
 	pgextSleepUs(us)
+}
+
+//go:linkname now time.now
+func now() (sec int64, nsec int32, mono int64) {
+	ns := pgextRealtimeNs()
+	sec = ns / 1e9
+	nsec = int32(ns - sec*1e9)
+	mono = nanotime()
+	return
+}
+
+//go:linkname syscall_Exit syscall.Exit
+func syscall_Exit(code int) {
+	exit(code)
+}
+
+// os.Args is empty: the backend's command line isn't the extension's.
+//
+//go:linkname os_runtime_args os.runtime_args
+func os_runtime_args() []string { return nil }
+
+//go:extern environ
+var environ *unsafe.Pointer
+
+// syscall_runtime_envs gives os.Getenv and friends the backend's environment
+// (the postmaster's, inherited at fork).
+//
+//go:linkname syscall_runtime_envs syscall.runtime_envs
+func syscall_runtime_envs() []string {
+	n := 0
+	for env := environ; *env != nil; env = (*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(env), unsafe.Sizeof(environ))) {
+		n++
+	}
+	envs := make([]string, 0, n)
+	for env := environ; *env != nil; env = (*unsafe.Pointer)(unsafe.Add(unsafe.Pointer(env), unsafe.Sizeof(environ))) {
+		s := _string{ptr: (*byte)(*env), length: strlen(*env)}
+		envs = append(envs, *(*string)(unsafe.Pointer(&s)))
+	}
+	return envs
+}
+
+// Signals belong to PostgreSQL (SIGTERM, SIGINT, SIGUSR1... drive the
+// backend), so os/signal can't take them over: these are TinyGo's stubs for
+// platforms without signals.
+
+//go:linkname signal_disable os/signal.signal_disable
+func signal_disable(uint32) {}
+
+//go:linkname signal_enable os/signal.signal_enable
+func signal_enable(uint32) {}
+
+//go:linkname signal_ignore os/signal.signal_ignore
+func signal_ignore(uint32) {}
+
+//go:linkname signal_waitUntilIdle os/signal.signalWaitUntilIdle
+func signal_waitUntilIdle() {}
+
+//go:linkname signal_recv os/signal.signal_recv
+func signal_recv() uint32 {
+	deadlock()
+	return 0
 }
 
 // The heap: a range of address space reserved at load (heap_max bytes, only
@@ -157,8 +206,6 @@ func pgextInit(size, max uintptr) bool {
 	heapEnd = heapStart + heapSize
 	initRand()
 	initHeap()
-	// time.Now: wall clock = monotonic + this offset.
-	timeOffset.Store(pgextRealtimeNs() - nanotime())
 	return true
 }
 

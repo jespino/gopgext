@@ -44,5 +44,8 @@ weight: 10
 - Long-running Go code must call `pg.CheckInterrupts()` to be cancelable.
 - Deep recursion in Go isn't checked (the backend's stack is the limit,
   usually 8 MB).
-- Linux x86-64 only; `os` file APIs are not available (TinyGo's baremetal
-  `os`): use `pg.ReadFile`/`pg.WriteFile`.
+- Linux x86-64 only. `os` works (files, directories, environment, through
+  the backend's libc), but files opened with it aren't tracked by
+  PostgreSQL: close them before returning, and prefer
+  `pg.ReadFile`/`pg.WriteFile` (atomic, durable writes). `os/signal` and
+  `os/exec` don't work: signals belong to the backend.

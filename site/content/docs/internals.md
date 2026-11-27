@@ -11,12 +11,14 @@ ext/{runtime.c, spi.c, functions.c, go.o} ──PGXS──▶ <name>.so (exports
 signatures ──▶ <name>.control, <name>--<version>.sql
 ```
 
-- **Target and runtime.** A custom TinyGo target (x86-64, PIC) with a
-  `pgext` runtime layer (`overlay/src/runtime/runtime_pgext.go`): output goes
-  to the server log, time comes from `clock_gettime`, sleeping is
-  `pg_usleep`, and `crypto/rand` (and the runtime's random seeds) read
-  PostgreSQL's `pg_strong_random` (OpenSSL's `RAND_bytes` or
-  `/dev/urandom`). A backend is a single-threaded process, so there is no
+- **Target and runtime.** A custom TinyGo target (hosted Linux x86-64, PIC)
+  with a `pgext` runtime layer (`overlay/src/runtime/runtime_pgext.go`) in
+  place of TinyGo's `runtime_unix.go`, which assumes the program owns the
+  process: output goes to the server log, time comes from `clock_gettime`,
+  sleeping is `pg_usleep`, signals are left to PostgreSQL, and `crypto/rand`
+  reads PostgreSQL's `pg_strong_random` (OpenSSL's `RAND_bytes` or
+  `/dev/urandom`). `syscall` and `os` are TinyGo's Linux ones, calling the
+  backend's libc. A backend is a single-threaded process, so there is no
   scheduler: Go code runs on the backend's own stack (which keeps
   `check_stack_depth()` and Go → SPI → Go recursion working), and only while
   PostgreSQL is calling into the extension.

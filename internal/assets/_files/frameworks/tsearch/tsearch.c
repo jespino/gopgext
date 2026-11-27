@@ -457,12 +457,29 @@ tsearch_open(const char *path, tsearch_readline_state **out)
  * tsearch_open for Go: the allocations, and AllocateFile ("exceeded
  * maxAllocatedDescs"), may raise errors. The errno is stored in *err.
  */
+static ErrorData *
+tsearch_open_guarded(const char *path, tsearch_readline_state **out, int *err)
+{
+	GOPGEXT_GUARD(*err = tsearch_open(path, out));
+}
+
 ErrorData *
 gopgext_tsearch_open(const char *path, tsearch_readline_state **out, int *err)
 {
+	ErrorData  *ed;
+
 	*out = NULL;
 	*err = 0;
-	GOPGEXT_GUARD(*err = tsearch_open(path, out));
+	ed = tsearch_open_guarded(path, out, err);
+
+	/*
+	 * PG_END_TRY restores error_context_stack, which drops the callback
+	 * tsearch_readline_begin pushed: push it again (its previous link is the
+	 * restored stack) so that it stays until gopgext_tsearch_close.
+	 */
+	if (*out)
+		error_context_stack = &(*out)->cb;
+	return ed;
 }
 
 /*

@@ -202,8 +202,7 @@ func (b *builder) run() (*Result, error) {
 	}
 
 	// 2. Strip debug info and make everything but the entry points the C
-	// runtime calls local: Go internals (runtime.alloc, main.main, ...) and
-	// the libc functions TinyGo's baremetal runtime defines (malloc, ...)
+	// runtime calls local: Go internals (runtime.alloc, main.main, ...)
 	// must not clash with the backend's or another extension's symbols.
 	keep := filepath.Join(work, "keep.txt")
 	if err := os.WriteFile(keep, []byte(strings.Join(keptSymbols, "\n")+"\n"), 0o644); err != nil {

@@ -2,7 +2,7 @@
   "llvm-target": "x86_64-unknown-linux-gnu",
   "cpu": "x86-64",
   "features": "+cx8,+fxsr,+mmx,+sse,+sse2",
-  "build-tags": ["pgext", "baremetal", "linux", "amd64"],
+  "build-tags": ["pgext", "linux", "amd64"],
   "goos": "linux",
   "goarch": "amd64",
   "gc": "conservative",
